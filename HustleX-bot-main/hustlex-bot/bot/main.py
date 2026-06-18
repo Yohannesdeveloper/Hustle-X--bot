@@ -142,7 +142,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"ℹ️ About HustleX: Learn more about our platform\n\n"
         f"⚙️ Settings: to customize your preferences\n\n"
         f"Want more powerful features? Go visit our website HustleX\n"
-        f"🌐 www.HustleXet.com"
+        f"🌐 https://hustlexet.vercel.app/"
     )
     
     keyboard = [[KeyboardButton("📱 Menu")]]
@@ -684,7 +684,7 @@ async def settings_terms_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "We reserve the right to modify these terms at any time. Continued use after changes constitutes acceptance.\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "📞 *Contact:* @HustleXSupport for questions\n"
-        "🌐 *Website:* www.HustleXet.com"
+        "🌐 *Website:* https://hustlexet.vercel.app/"
     )
     
     await context.bot.send_message(
@@ -1554,7 +1554,7 @@ async def privacy_policy_handler(update: Update, context: ContextTypes.DEFAULT_T
         "• No third-party tracking\n\n"
         "━━━━━━━━━━━━━━━━━━━━━━\n"
         "📞 *Contact:* @HustleXSupport\n"
-        "🌐 *Website:* www.HustleXet.com"
+        "🌐 *Website:* https://hustlexet.vercel.app/"
     )
     
     await context.bot.send_message(
