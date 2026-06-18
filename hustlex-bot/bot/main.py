@@ -2153,8 +2153,25 @@ def main():
     # Add error handler
     app.add_error_handler(error_handler)
 
+    async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        # Show profile web app
+        keyboard = [
+            [KeyboardButton("Open Profile", web_app=WebAppInfo(url="https://hustlexet.vercel.app/freelancer-profile-setup"))]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+        await update.effective_message.reply_text(
+            "👤 *Profile*\n\nClick the button below to open your profile:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+
     # Command handlers
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu_callback))
+    app.add_handler(CommandHandler("about", about_cb))
+    app.add_handler(CommandHandler("applications", applications_cb))
+    app.add_handler(CommandHandler("settings", settings_cb))
+    app.add_handler(CommandHandler("profile", profile_cmd))
 
     # Job Posting ConversationHandler
     job_post_conv = ConversationHandler(
