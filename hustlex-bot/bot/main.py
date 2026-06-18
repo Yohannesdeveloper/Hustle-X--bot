@@ -358,6 +358,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '⬅️ Torna alle Impostazioni': 'settings',
         '⬅️ Voltar às Configurações': 'settings',
         '⬅️ ወደ ቅንብሮች ይመለሱ': 'settings',
+        # Account settings
+        '👤 View Profile': 'account_view_profile',
+        '🔔 Notifications': 'account_notifications',
+        '🗑️ Delete Account': 'account_delete',
+        # CV settings
+        '👁️ View Current CV': 'cv_view',
+        '📤 Upload New CV': 'cv_upload',
+        '🗑️ Remove CV': 'cv_remove',
+        # Terms settings
+        '🔒 Privacy Policy': 'terms_privacy',
+        # Back button
+        '⬅️ Back to My CV': 'settings_cv',
+        '⬅️ Back to Languages': 'settings_languages',
     }
     
     # Check if the text matches any menu item
@@ -398,9 +411,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await settings_terms_cb(update, context)
     elif action and action.startswith('lang_'):
         # Handle language selection
-        # We need to call the language_selection function, but it expects a CallbackQuery!
-        # Let's create a fake update or adapt the function!
-        # First, let's extract the lang code
         lang_code = action.split('_')[1]
         user_languages[user_id] = lang_code
         # Now send a confirmation message!
@@ -458,6 +468,44 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.effective_message.reply_text(
             f"{msg['title']}\n\n{msg['message']}",
             reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+    elif action == 'account_view_profile':
+        user = update.effective_user
+        await update.effective_message.reply_text(
+            f"👤 *Profile Information*\n\n"
+            f"• Name: {user.first_name or 'Not set'}\n"
+            f"• Username: @{user.username or 'Not set'}\n"
+            f"• User ID: {user.id}",
+            parse_mode="Markdown"
+        )
+    elif action == 'account_notifications':
+        await update.effective_message.reply_text("🔔 *Notifications Settings*\n\nThis feature is coming soon!", parse_mode="Markdown")
+    elif action == 'account_delete':
+        await update.effective_message.reply_text("🗑️ *Delete Account*\n\nThis action is not reversible! This feature is coming soon.", parse_mode="Markdown")
+    elif action == 'cv_view':
+        user_id = update.effective_user.id
+        if user_id in user_cvs and user_cvs[user_id]:
+            cv_info = user_cvs[user_id]
+            await update.effective_message.reply_text(f"👁️ *Your CV*\n\nFile: {cv_info.get('filename', 'Unknown')}", parse_mode="Markdown")
+        else:
+            await update.effective_message.reply_text("❌ No CV uploaded yet!", parse_mode="Markdown")
+    elif action == 'cv_upload':
+        await update.effective_message.reply_text("📤 *Upload CV*\n\nPlease send your CV file as a document (PDF or DOCX).", parse_mode="Markdown")
+    elif action == 'cv_remove':
+        user_id = update.effective_user.id
+        if user_id in user_cvs:
+            del user_cvs[user_id]
+            await update.effective_message.reply_text("✅ CV removed successfully!", parse_mode="Markdown")
+        else:
+            await update.effective_message.reply_text("❌ No CV to remove!", parse_mode="Markdown")
+    elif action == 'terms_privacy':
+        await update.effective_message.reply_text(
+            "🔒 *Privacy Policy*\n\n"
+            "We take your privacy seriously. Here's what we do:\n\n"
+            "• We don't share your personal information without consent\n"
+            "• CVs are stored securely and only shared with your consent\n"
+            "• You can delete your data at any time",
             parse_mode="Markdown"
         )
 
@@ -695,74 +743,90 @@ async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
     user = update.effective_user
     keyboard = [
-        [InlineKeyboardButton("👤 View Profile", callback_data="account_edit_profile")],
-        [InlineKeyboardButton("🔔 Notifications", callback_data="account_notifications")],
-        [InlineKeyboardButton("🗑️ Delete Account", callback_data="account_delete")],
-        [InlineKeyboardButton("⬅️ Back to Settings", callback_data="settings")]
+        [KeyboardButton("👤 View Profile"), KeyboardButton("🔔 Notifications")],
+        [KeyboardButton("🗑️ Delete Account"), KeyboardButton("⬅️ Back to Settings")]
     ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
-    await safe_edit_message(
-        q,
-        f"👤 *Account Settings*\n\n"
-        f"📋 *Profile Information:*\n"
-        f"• Name: {user.first_name or 'Not set'}\n"
-        f"• Username: @{user.username or 'Not set'}\n"
-        f"• User ID: {user.id}\n\n"
-        f"⚙️ Manage your account settings below:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-        context=context
-    )
+    if update.callback_query:
+        q = update.callback_query
+        await q.answer()
+        await safe_edit_message(
+            q,
+            f"👤 *Account Settings*\n\n"
+            f"📋 *Profile Information:*\n"
+            f"• Name: {user.first_name or 'Not set'}\n"
+            f"• Username: @{user.username or 'Not set'}\n"
+            f"• User ID: {user.id}\n\n"
+            f"⚙️ Manage your account settings below:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+            context=context
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"👤 *Account Settings*\n\n"
+            f"📋 *Profile Information:*\n"
+            f"• Name: {user.first_name or 'Not set'}\n"
+            f"• Username: @{user.username or 'Not set'}\n"
+            f"• User ID: {user.id}\n\n"
+            f"⚙️ Manage your account settings below:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 async def settings_cv_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
     user_id = update.effective_user.id
     has_cv = user_id in user_cvs and user_cvs[user_id] is not None
     
     if has_cv:
         cv_info = user_cvs[user_id]
         keyboard = [
-            [InlineKeyboardButton("👁️ View Current CV", callback_data="cv_view")],
-            [InlineKeyboardButton("📤 Upload New CV", callback_data="cv_upload")],
-            [InlineKeyboardButton("🗑️ Remove CV", callback_data="cv_remove")],
-            [InlineKeyboardButton("⬅️ Back to Settings", callback_data="settings")]
+            [KeyboardButton("👁️ View Current CV"), KeyboardButton("📤 Upload New CV")],
+            [KeyboardButton("🗑️ Remove CV"), KeyboardButton("⬅️ Back to Settings")]
         ]
         status_text = f"✅ CV uploaded: {cv_info.get('filename', 'Unknown')}"
     else:
         keyboard = [
-            [InlineKeyboardButton("📤 Upload New CV", callback_data="cv_upload")],
-            [InlineKeyboardButton("⬅️ Back to Settings", callback_data="settings")]
+            [KeyboardButton("📤 Upload New CV"), KeyboardButton("⬅️ Back to Settings")]
         ]
         status_text = "❌ No CV uploaded"
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
-    await safe_edit_message(
-        q,
-        f"📄 *My CV*\n\n"
-        f"📁 *Current Status:* {status_text}\n"
-        f"📝 *Supported formats:* PDF, DOCX\n"
-        f"📏 *Max file size:* 16 MB\n\n"
-        f"💡 *Tip:* A well-formatted CV increases your chances of getting hired!\n\n"
-        f"Choose an option below:",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-        context=context
-    )
+    if update.callback_query:
+        q = update.callback_query
+        await q.answer()
+        await safe_edit_message(
+            q,
+            f"📄 *My CV*\n\n"
+            f"📁 *Current Status:* {status_text}\n"
+            f"📝 *Supported formats:* PDF, DOCX\n"
+            f"📏 *Max file size:* 16 MB\n\n"
+            f"💡 *Tip:* A well-formatted CV increases your chances of getting hired!\n\n"
+            f"Choose an option below:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+            context=context
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"📄 *My CV*\n\n"
+            f"📁 *Current Status:* {status_text}\n"
+            f"📝 *Supported formats:* PDF, DOCX\n"
+            f"📏 *Max file size:* 16 MB\n\n"
+            f"💡 *Tip:* A well-formatted CV increases your chances of getting hired!\n\n"
+            f"Choose an option below:",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 async def settings_terms_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
     keyboard = [
-        [InlineKeyboardButton("🔒 Privacy Policy", callback_data="terms_privacy")],
-        [InlineKeyboardButton("⬅️ Back to Settings", callback_data="settings")]
+        [KeyboardButton("🔒 Privacy Policy"), KeyboardButton("⬅️ Back to Settings")]
     ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
     terms_text = (
         "📋 *Terms and Conditions*\n\n"
@@ -781,13 +845,22 @@ async def settings_terms_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "📞 *Contact:* @HustleXSupport for questions"
     )
     
-    await safe_edit_message(
-        q,
-        terms_text,
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-        context=context
-    )
+    if update.callback_query:
+        q = update.callback_query
+        await q.answer()
+        await safe_edit_message(
+            q,
+            terms_text,
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+            context=context
+        )
+    else:
+        await update.effective_message.reply_text(
+            terms_text,
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 # ---------------------------
 # Additional Settings Handlers
