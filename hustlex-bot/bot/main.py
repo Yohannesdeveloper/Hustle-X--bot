@@ -183,8 +183,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
         'es': {
             'title': "Elige una pestaña:",
-            'post_telegram': "Publicar Trabajo en Telegram",
-            'post_website': "Publicar Trabajo vía Sitio Web",
             'profile': "Perfil",
             'applications': "Aplicaciones",
             'about': "Acerca de HustleX",
@@ -193,8 +191,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
         'fr': {
             'title': "Choisissez un onglet:",
-            'post_telegram': "Publier un Emploi sur Telegram",
-            'post_website': "Publier un Emploi via le Site Web",
             'profile': "Profil",
             'applications': "Candidatures",
             'about': "À propos de HustleX",
@@ -203,8 +199,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
         'de': {
             'title': "Wählen Sie einen Tab:",
-            'post_telegram': "Stelle in Telegram veröffentlichen",
-            'post_website': "Stelle über Website veröffentlichen",
             'profile': "Profil",
             'applications': "Bewerbungen",
             'about': "Über HustleX",
@@ -213,8 +207,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
         'it': {
             'title': "Scegli una scheda:",
-            'post_telegram': "Pubblica Lavoro su Telegram",
-            'post_website': "Pubblica Lavoro via Sito Web",
             'profile': "Profilo",
             'applications': "Candidature",
             'about': "Informazioni su HustleX",
@@ -223,8 +215,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
         'pt': {
             'title': "Escolha uma aba:",
-            'post_telegram': "Publicar Emprego no Telegram",
-            'post_website': "Publicar Emprego via Site",
             'profile': "Perfil",
             'applications': "Candidaturas",
             'about': "Sobre o HustleX",
@@ -233,8 +223,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         },
         'am': {
             'title': "አንድ ትር ይምረጡ:",
-            'post_telegram': "ሥራን በቴሌግራም ያስቀምጡ",
-            'post_website': "ሥራን በድር ጣቢያ ያስቀምጡ",
             'profile': "መገለጫ",
             'applications': "ማመልከቻዎች",
             'about': "ስለ HustleX",
