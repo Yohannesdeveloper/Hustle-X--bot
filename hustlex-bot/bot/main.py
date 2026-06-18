@@ -6,7 +6,7 @@ import re
 import logging
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telegram.error import TelegramError
 from urllib.parse import urlparse
@@ -132,17 +132,18 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     messages = welcome_messages.get(lang_code, welcome_messages['en'])
-    keyboard = [[InlineKeyboardButton(messages['menu'], callback_data="menu")]]
+    keyboard = [[KeyboardButton(messages['menu'])]]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
     if update.effective_message:
         await update.effective_message.reply_text(
             messages['welcome'],
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=reply_markup
         )
     else:
         await update.effective_chat.send_message(
             messages['welcome'],
-            reply_markup=InlineKeyboardMarkup(keyboard)
+            reply_markup=reply_markup
         )
 
 # ---------------------------
@@ -166,9 +167,6 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=None, con
 # Menu callback
 # ---------------------------
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     
@@ -250,37 +248,234 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Validate WebApp URL before showing menu
     if not await validate_webapp_url(WEBAPP_URL):
-        try:
-            await q.edit_message_text(messages['error'])
-        except Exception:
-            await context.bot.send_message(
-                chat_id=update.effective_chat.id,
-                text=messages['error']
-            )
+        if update.effective_message:
+            await update.effective_message.reply_text(messages['error'])
+        else:
+            await update.effective_chat.send_message(messages['error'])
         return
     
     keyboard = [
-        [InlineKeyboardButton(messages['post_telegram'], callback_data="post_job_telegram")],
-        [InlineKeyboardButton(messages['post_website'], web_app=WebAppInfo(url=f"{WEBAPP_URL}"))],
-        [InlineKeyboardButton(messages['profile'], web_app=WebAppInfo(url=f"{WEBAPP_URL}profile.html"))],
-        [InlineKeyboardButton(messages['applications'], callback_data="applications")],
-        [InlineKeyboardButton(messages['about'], callback_data="about")],
-        [InlineKeyboardButton(messages['settings'], callback_data="settings")],
+        [KeyboardButton(messages['post_telegram'])],
+        [KeyboardButton(messages['post_website'], web_app=WebAppInfo(url=f"{WEBAPP_URL}"))],
+        [KeyboardButton(messages['profile'], web_app=WebAppInfo(url=f"{WEBAPP_URL}profile.html"))],
+        [KeyboardButton(messages['applications'])],
+        [KeyboardButton(messages['about'])],
+        [KeyboardButton(messages['settings'])],
     ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
-    await safe_edit_message(q, messages['title'], reply_markup=InlineKeyboardMarkup(keyboard), context=context)
+    if update.effective_message:
+        await update.effective_message.reply_text(
+            messages['title'],
+            reply_markup=reply_markup
+        )
+    else:
+        await update.effective_chat.send_message(
+            messages['title'],
+            reply_markup=reply_markup
+        )
+
+# ---------------------------
+# Text message handler for menu
+# ---------------------------
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang_code = user_languages.get(user_id, 'en')
+    text = update.effective_message.text.strip()
+    
+    # Language-specific menu texts (all possible options)
+    menu_texts = {
+        'Menu': 'menu',
+        'Menú': 'menu',
+        'የሚመርጡትን': 'menu',
+        'Post Job in Telegram': 'post_job_telegram',
+        'Publicar Trabajo en Telegram': 'post_job_telegram',
+        'Publier un Emploi sur Telegram': 'post_job_telegram',
+        'Stelle in Telegram veröffentlichen': 'post_job_telegram',
+        'Pubblica Lavoro su Telegram': 'post_job_telegram',
+        'Publicar Emprego no Telegram': 'post_job_telegram',
+        'ሥራን በቴሌግራም ያስቀምጡ': 'post_job_telegram',
+        'Applications': 'applications',
+        'Aplicaciones': 'applications',
+        'Candidatures': 'applications',
+        'Bewerbungen': 'applications',
+        'ማመልከቻዎች': 'applications',
+        'About HustleX': 'about',
+        'Acerca de HustleX': 'about',
+        'À propos de HustleX': 'about',
+        'Über HustleX': 'about',
+        'Informazioni su HustleX': 'about',
+        'Sobre o HustleX': 'about',
+        'ስለ HustleX': 'about',
+        'Settings': 'settings',
+        'Configuración': 'settings',
+        'Paramètres': 'settings',
+        'Einstellungen': 'settings',
+        'Impostazioni': 'settings',
+        'Configurações': 'settings',
+        'ቅንብሮች': 'settings',
+        '⬅️ Back to Menu': 'menu',
+        '⬅️ Volver al Menú': 'menu',
+        '⬅️ Retour au Menu': 'menu',
+        '⬅️ Zurück zum Menü': 'menu',
+        '⬅️ Torna al Menu': 'menu',
+        '⬅️ Voltar ao Menu': 'menu',
+        '⬅️ ወደ ሜኑ ይመለሱ': 'menu',
+        '🌍 Languages': 'settings_languages',
+        '🌍 Idiomas': 'settings_languages',
+        '🌍 Langues': 'settings_languages',
+        '🌍 Sprachen': 'settings_languages',
+        '🌍 Lingue': 'settings_languages',
+        '🌍 ቋንቋዎች': 'settings_languages',
+        '👤 Account': 'settings_account',
+        '👤 Cuenta': 'settings_account',
+        '👤 Compte': 'settings_account',
+        '👤 Konto': 'settings_account',
+        '📄 My CV': 'settings_cv',
+        '📄 Mi CV': 'settings_cv',
+        '📄 Mon CV': 'settings_cv',
+        '📄 Mein Lebenslauf': 'settings_cv',
+        '📄 Il Mio CV': 'settings_cv',
+        '📄 Meu CV': 'settings_cv',
+        '📄 የእኔ CV': 'settings_cv',
+        '📋 Terms and Conditions': 'settings_terms',
+        '📋 Términos y Condiciones': 'settings_terms',
+        '📋 Termes et Conditions': 'settings_terms',
+        '📋 Geschäftsbedingungen': 'settings_terms',
+        '📋 Termini e Condizioni': 'settings_terms',
+        '📋 Termos e Condições': 'settings_terms',
+        '📋 ውሎች እና ሁኔታዎች': 'settings_terms',
+        # Language selection options
+        '🇺🇸 English': 'lang_en',
+        '🇪🇸 Español': 'lang_es',
+        '🇫🇷 Français': 'lang_fr',
+        '🇩🇪 Deutsch': 'lang_de',
+        '🇮🇹 Italiano': 'lang_it',
+        '🇵🇹 Português': 'lang_pt',
+        '🇪🇹 አማርኛ (Amharic)': 'lang_am',
+        # Back to settings
+        '⬅️ Back to Settings': 'settings',
+        '⬅️ Volver a Configuración': 'settings',
+        '⬅️ Retour aux Paramètres': 'settings',
+        '⬅️ Zurück zu Einstellungen': 'settings',
+        '⬅️ Torna alle Impostazioni': 'settings',
+        '⬅️ Voltar às Configurações': 'settings',
+        '⬅️ ወደ ቅንብሮች ይመለሱ': 'settings',
+    }
+    
+    # Check if the text matches any menu item
+    action = menu_texts.get(text)
+    
+    if action == 'menu':
+        await menu_callback(update, context)
+    elif action == 'post_job_telegram':
+        await post_job_start(update, context)
+    elif action == 'applications':
+        await update.effective_message.reply_text("Applications: (placeholder)")
+    elif action == 'about':
+        about_text = (
+            "🚀 *About HustleX*\n\n"
+            "Welcome to *HustleX* – where *ambition meets opportunity!* ✨\n\n"
+            "At HustleX, we believe talent has *no limits* 🌍. Whether you’re a designer 🎨, "
+            "developer 💻, writer ✍️, or digital wizard 🪄, we connect skilled freelancers with "
+            "clients who value *quality, creativity, and reliability*.\n\n"
+            "*Our mission:* 💪 Elevate projects 📈 Transform careers 🌟\n\n"
+            "*Why HustleX?*\n"
+            "- *Seamless Experience:* Navigate your freelance journey effortlessly ⚡\n"
+            "- *Trusted Connections:* Work with verified clients and freelancers 🤝\n"
+            "- *Smart Tools:* Manage profiles, applications, and projects—all in Telegram 📲\n"
+            "- *Growth-Focused:* Showcase your skills, build your reputation, and level up 🚀\n\n"
+            "Join *HustleX* today and turn your skills into opportunities! 🔥 "
+            "Because here, *every hustle counts* 💼💎"
+        )
+        await update.effective_message.reply_text(about_text, parse_mode="Markdown")
+    elif action == 'settings':
+        await settings_cb(update, context)
+    elif action == 'settings_languages':
+        await settings_languages_cb(update, context)
+    elif action == 'settings_account':
+        await settings_account_cb(update, context)
+    elif action == 'settings_cv':
+        await settings_cv_cb(update, context)
+    elif action == 'settings_terms':
+        await settings_terms_cb(update, context)
+    elif action and action.startswith('lang_'):
+        # Handle language selection
+        # We need to call the language_selection function, but it expects a CallbackQuery!
+        # Let's create a fake update or adapt the function!
+        # First, let's extract the lang code
+        lang_code = action.split('_')[1]
+        user_languages[user_id] = lang_code
+        # Now send a confirmation message!
+        lang_names = {
+            'en': '🇺🇸 English',
+            'es': '🇪🇸 Español', 
+            'fr': '🇫🇷 Français',
+            'de': '🇩🇪 Deutsch',
+            'it': '🇮🇹 Italiano',
+            'pt': '🇵🇹 Português',
+            'am': '🇪🇹 አማርኛ (Amharic)'
+        }
+        selected_lang = lang_names.get(lang_code, 'English')
+        # Language-specific messages
+        confirmation_messages = {
+            'en': {
+                'title': "✅ *Language Updated!*",
+                'message': f"🌍 *Selected Language:* {selected_lang}\n\n📝 All bot messages will now be displayed in your selected language.",
+                'back': "⬅️ Back to Languages"
+            },
+            'es': {
+                'title': "✅ *¡Idioma Actualizado!*",
+                'message': f"🌍 *Idioma Seleccionado:* {selected_lang}\n\n📝 Todos los mensajes del bot ahora se mostrarán en tu idioma seleccionado.",
+                'back': "⬅️ Volver a Idiomas"
+            },
+            'fr': {
+                'title': "✅ *Langue Mise à Jour!*",
+                'message': f"🌍 *Langue Sélectionnée:* {selected_lang}\n\n📝 Tous les messages du bot s'afficheront maintenant dans votre langue sélectionnée.",
+                'back': "⬅️ Retour aux Langues"
+            },
+            'de': {
+                'title': "✅ *Sprache Aktualisiert!*",
+                'message': f"🌍 *Ausgewählte Sprache:* {selected_lang}\n\n📝 Alle Bot-Nachrichten werden jetzt in Ihrer ausgewählten Sprache angezeigt.",
+                'back': "⬅️ Zurück zu Sprachen"
+            },
+            'it': {
+                'title': "✅ *Lingua Aggiornata!*",
+                'message': f"🌍 *Lingua Selezionata:* {selected_lang}\n\n📝 Tutti i messaggi del bot ora verranno visualizzati nella tua lingua selezionata.",
+                'back': "⬅️ Torna alle Lingue"
+            },
+            'pt': {
+                'title': "✅ *Idioma Atualizado!*",
+                'message': f"🌍 *Idioma Selecionado:* {selected_lang}\n\n📝 Todas as mensagens do bot agora serão exibidas no seu idioma selecionado.",
+                'back': "⬅️ Voltar aos Idiomas"
+            },
+            'am': {
+                'title': "✅ *ቋንቋ ተዘምኗል!*",
+                'message': f"🌍 *የተመረጠ ቋንቋ:* {selected_lang}\n\n📝 ሁሉም የቦት መልዕክቶች አሁን በተመረጠዎ ቋንቋ ይታያሉ።",
+                'back': "⬅️ ወደ ቋንቋዎች ይመለሱ"
+            }
+        }
+        msg = confirmation_messages.get(lang_code, confirmation_messages['en'])
+        keyboard = [[KeyboardButton(msg['back'])]]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+        await update.effective_message.reply_text(
+            f"{msg['title']}\n\n{msg['message']}",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 # ---------------------------
 # Other tab callbacks
 # ---------------------------
 async def applications_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    await q.edit_message_text("Applications: (placeholder)")
+    if update.callback_query:
+        q = update.callback_query
+        await q.answer()
+        await q.edit_message_text("Applications: (placeholder)")
+    else:
+        await update.effective_message.reply_text("Applications: (placeholder)")
 
 async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
     about_text = (
         "🚀 *About HustleX*\n\n"
         "Welcome to *HustleX* – where *ambition meets opportunity!* ✨\n\n"
@@ -296,12 +491,14 @@ async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Join *HustleX* today and turn your skills into opportunities! 🔥 "
         "Because here, *every hustle counts* 💼💎"
     )
-    await q.edit_message_text(about_text, parse_mode="Markdown")
+    if update.callback_query:
+        q = update.callback_query
+        await q.answer()
+        await q.edit_message_text(about_text, parse_mode="Markdown")
+    else:
+        await update.effective_message.reply_text(about_text, parse_mode="Markdown")
 
 async def settings_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     
@@ -375,28 +572,35 @@ async def settings_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     messages = settings_messages.get(lang_code, settings_messages['en'])
     
     keyboard = [
-        [InlineKeyboardButton(messages['languages'], callback_data="settings_languages")],
-        [InlineKeyboardButton(messages['account'], callback_data="settings_account")],
-        [InlineKeyboardButton(messages['cv'], callback_data="settings_cv")],
-        [InlineKeyboardButton(messages['terms'], callback_data="settings_terms")],
-        [InlineKeyboardButton(messages['back'], callback_data="menu")]
+        [KeyboardButton(messages['languages'])],
+        [KeyboardButton(messages['account'])],
+        [KeyboardButton(messages['cv'])],
+        [KeyboardButton(messages['terms'])],
+        [KeyboardButton(messages['back'])]
     ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
-    await safe_edit_message(
-        q,
-        f"{messages['title']}\n\n{messages['instruction']}",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-        context=context
-    )
+    if update.callback_query:
+        q = update.callback_query
+        await q.answer()
+        await safe_edit_message(
+            q,
+            f"{messages['title']}\n\n{messages['instruction']}",
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+            context=context
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"{messages['title']}\n\n{messages['instruction']}",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 # ---------------------------
 # Settings Tab Callbacks
 # ---------------------------
 async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
     user_id = update.effective_user.id
     current_lang = user_languages.get(user_id, 'en')
     
@@ -468,23 +672,35 @@ async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TY
     msg = messages.get(current_lang, messages['en'])
     
     keyboard = [
-        [InlineKeyboardButton("🇺🇸 English", callback_data="lang_en")],
-        [InlineKeyboardButton("🇪🇸 Español", callback_data="lang_es")],
-        [InlineKeyboardButton("🇫🇷 Français", callback_data="lang_fr")],
-        [InlineKeyboardButton("🇩🇪 Deutsch", callback_data="lang_de")],
-        [InlineKeyboardButton("🇮🇹 Italiano", callback_data="lang_it")],
-        [InlineKeyboardButton("🇵🇹 Português", callback_data="lang_pt")],
-        [InlineKeyboardButton("🇪🇹 አማርኛ (Amharic)", callback_data="lang_am")],
-        [InlineKeyboardButton(msg['back'], callback_data="settings")]
+        [KeyboardButton("🇺🇸 English")],
+        [KeyboardButton("🇪🇸 Español")],
+        [KeyboardButton("🇫🇷 Français")],
+        [KeyboardButton("🇩🇪 Deutsch")],
+        [KeyboardButton("🇮🇹 Italiano")],
+        [KeyboardButton("🇵🇹 Português")],
+        [KeyboardButton("🇪🇹 አማርኛ (Amharic)")],
+        [KeyboardButton(msg['back'])]
     ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
-    await safe_edit_message(
-        q,
-        f"{msg['title']}\n\n{msg['instruction']}\n\n{msg['current']}\n{msg['tip']}",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
-        context=context
-    )
+    # Also add these language options to the handle_text function's menu_texts dict!
+    # Let's update handle_text later, but first handle the current function!
+    if update.callback_query:
+        q = update.callback_query
+        await q.answer()
+        await safe_edit_message(
+            q,
+            f"{msg['title']}\n\n{msg['instruction']}\n\n{msg['current']}\n{msg['tip']}",
+            reply_markup=reply_markup,
+            parse_mode="Markdown",
+            context=context
+        )
+    else:
+        await update.effective_message.reply_text(
+            f"{msg['title']}\n\n{msg['instruction']}\n\n{msg['current']}\n{msg['tip']}",
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
 
 async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -1859,7 +2075,8 @@ def main():
     # Job Posting ConversationHandler
     job_post_conv = ConversationHandler(
         entry_points=[CallbackQueryHandler(post_job_start, pattern="^post_job_telegram$"),
-                      CommandHandler("postjob", post_job_start)],
+                      CommandHandler("postjob", post_job_start),
+                      MessageHandler(filters.Regex(r'^Post Job in Telegram$') | filters.Regex(r'^Publicar Trabajo en Telegram$') | filters.Regex(r'^Publier un Emploi sur Telegram$') | filters.Regex(r'^Stelle in Telegram veröffentlichen$') | filters.Regex(r'^Pubblica Lavoro su Telegram$') | filters.Regex(r'^Publicar Emprego no Telegram$') | filters.Regex(r'^ሥራን በቴሌግራም ያስቀምጡ$'), post_job_start)],
         states={
             JOB_TITLE: [MessageHandler(filters.TEXT & ~filters.COMMAND, job_title)],
             JOB_TYPE: [MessageHandler(filters.TEXT & ~filters.COMMAND, job_type)],
@@ -1910,6 +2127,9 @@ def main():
 
     # File/message handlers
     app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, file_handler))
+    
+    # Text menu handler
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
 
     # Run bot
     app.run_polling()
