@@ -242,7 +242,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     keyboard = [
-        [KeyboardButton(messages['profile'], web_app=WebAppInfo(url=f"{WEBAPP_URL}profile.html")), KeyboardButton(messages['applications'], web_app=WebAppInfo(url="https://hustlexet.vercel.app/my-applications"))],
+        [KeyboardButton(messages['profile'], web_app=WebAppInfo(url="https://hustlexet.vercel.app/freelancer-profile-setup")), KeyboardButton(messages['applications'], web_app=WebAppInfo(url="https://hustlexet.vercel.app/my-applications"))],
         [KeyboardButton(messages['about']), KeyboardButton(messages['settings'])]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
