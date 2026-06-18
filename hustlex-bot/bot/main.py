@@ -284,7 +284,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_texts = {
         'Menu': 'menu',
         'Menú': 'menu',
-        'የሚመርጡትን': 'menu',
+        'ሜኑ': 'menu',  # Amharic menu
+        # Start menu
         'Post Job in Telegram': 'post_job_telegram',
         'Publicar Trabajo en Telegram': 'post_job_telegram',
         'Publier un Emploi sur Telegram': 'post_job_telegram',
@@ -292,10 +293,22 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'Pubblica Lavoro su Telegram': 'post_job_telegram',
         'Publicar Emprego no Telegram': 'post_job_telegram',
         'ሥራን በቴሌግራም ያስቀምጡ': 'post_job_telegram',
+        'Post Job via Website': 'post_job_website',
+        'Publicar Trabajo vía Sitio Web': 'post_job_website',
+        'Publier un Emploi via le Site Web': 'post_job_website',
+        'Stelle über Website veröffentlichen': 'post_job_website',
+        'Pubblica Lavoro via Sito Web': 'post_job_website',
+        'Publicar Emprego via Site': 'post_job_website',
+        'ሥራን በድር ጣቢያ ያስቀምጡ': 'post_job_website',
+        'Profile': 'profile',
+        'Perfil': 'profile',
+        'Profil': 'profile',
+        'መገለጫ': 'profile',
         'Applications': 'applications',
         'Aplicaciones': 'applications',
         'Candidatures': 'applications',
         'Bewerbungen': 'applications',
+        'Candidature': 'applications',
         'ማመልከቻዎች': 'applications',
         'About HustleX': 'about',
         'Acerca de HustleX': 'about',
@@ -311,6 +324,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'Impostazioni': 'settings',
         'Configurações': 'settings',
         'ቅንብሮች': 'settings',
+        # Back buttons
         '⬅️ Back to Menu': 'menu',
         '⬅️ Volver al Menú': 'menu',
         '⬅️ Retour au Menu': 'menu',
@@ -318,6 +332,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '⬅️ Torna al Menu': 'menu',
         '⬅️ Voltar ao Menu': 'menu',
         '⬅️ ወደ ሜኑ ይመለሱ': 'menu',
+        # Settings sub-menus
         '🌍 Languages': 'settings_languages',
         '🌍 Idiomas': 'settings_languages',
         '🌍 Langues': 'settings_languages',
@@ -328,6 +343,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '👤 Cuenta': 'settings_account',
         '👤 Compte': 'settings_account',
         '👤 Konto': 'settings_account',
+        '👤 Conta': 'settings_account',
+        '👤 መለያ': 'settings_account',
         '📄 My CV': 'settings_cv',
         '📄 Mi CV': 'settings_cv',
         '📄 Mon CV': 'settings_cv',
@@ -358,19 +375,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '⬅️ Torna alle Impostazioni': 'settings',
         '⬅️ Voltar às Configurações': 'settings',
         '⬅️ ወደ ቅንብሮች ይመለሱ': 'settings',
-        # Account settings
+        # Account settings buttons
         '👤 View Profile': 'account_view_profile',
         '🔔 Notifications': 'account_notifications',
         '🗑️ Delete Account': 'account_delete',
-        # CV settings
+        # CV settings buttons
         '👁️ View Current CV': 'cv_view',
         '📤 Upload New CV': 'cv_upload',
         '🗑️ Remove CV': 'cv_remove',
-        # Terms settings
+        # Terms settings buttons
         '🔒 Privacy Policy': 'terms_privacy',
-        # Back button
+        # Back to CV
         '⬅️ Back to My CV': 'settings_cv',
+        # Back to languages
         '⬅️ Back to Languages': 'settings_languages',
+        '⬅️ Volver a Idiomas': 'settings_languages',
+        '⬅️ Retour aux Langues': 'settings_languages',
+        '⬅️ Zurück zu Sprachen': 'settings_languages',
+        '⬅️ Torna alle Lingue': 'settings_languages',
+        '⬅️ Voltar aos Idiomas': 'settings_languages',
+        '⬅️ ወደ ቋንቋዎች ይመለሱ': 'settings_languages',
     }
     
     # Check if the text matches any menu item
@@ -380,6 +404,18 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await menu_callback(update, context)
     elif action == 'post_job_telegram':
         await post_job_start(update, context)
+    elif action == 'post_job_website':
+        # Post via website is a web app, but let's send a message
+        await update.effective_message.reply_text(
+            "🌐 *Post Job via Website*\n\nPlease use the web app to post your job.",
+            parse_mode="Markdown"
+        )
+    elif action == 'profile':
+        # Profile is a web app
+        await update.effective_message.reply_text(
+            "👤 *Profile*\n\nPlease use the web app to view your profile.",
+            parse_mode="Markdown"
+        )
     elif action == 'applications':
         await update.effective_message.reply_text("Applications: (placeholder)")
     elif action == 'about':
