@@ -271,10 +271,14 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #     )
     #     return
     
-    # Reply keyboard for menu options
+    # WebApp URLs
+    profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
+    applications_url = f"{WEBAPP_URL.rstrip('/')}/my-applications"
+
+    # Reply keyboard for menu options with WebApp buttons
     reply_keyboard = [
-        [KeyboardButton(messages['profile'])],
-        [KeyboardButton(messages['applications']), KeyboardButton(messages['about'])],
+        [KeyboardButton(messages['profile'], web_app=WebAppInfo(url=profile_url))],
+        [KeyboardButton(messages['applications'], web_app=WebAppInfo(url=applications_url)), KeyboardButton(messages['about'])],
         [KeyboardButton(messages['settings'])]
     ]
     
@@ -326,7 +330,7 @@ async def applications_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         q = update.callback_query
         await q.answer()
 
-    applications_url = "https://hustlexet.vercel.app/my-applications"
+    applications_url = f"{WEBAPP_URL.rstrip('/')}/my-applications"
 
     # Reply keyboard with WebApp button (no inline keyboard)
     reply_keyboard = [
@@ -1076,8 +1080,24 @@ async def account_edit_profile_handler(update: Update, context: ContextTypes.DEF
     if update.callback_query:
         q = update.callback_query
         await q.answer()
-    
-    await start_profile_wizard(update, context)
+
+    profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
+
+    # Reply keyboard with WebApp button
+    reply_keyboard = [
+        [KeyboardButton("👤 Open Profile", web_app=WebAppInfo(url=profile_url))],
+        [KeyboardButton("⬅️ Back to Menu")]
+    ]
+
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="👤 *Profile*\n\nTap the button below to set up or edit your freelancer profile.",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
+    )
 
 # Profile Wizard - Step by step profile editing
 PROFILE_WIZARD_STEPS = ['first_name', 'last_name', 'email', 'age', 'gender', 'city', 'country']
