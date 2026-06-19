@@ -163,6 +163,23 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # ---------------------------
 # Utility function for safe message editing
 # ---------------------------
+async def try_delete_user_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Try to delete the user's message to clean up old keyboards.
+    Works for both regular messages and callback queries."""
+    try:
+        if update.callback_query:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=update.callback_query.message.message_id
+            )
+        elif update.message:
+            await context.bot.delete_message(
+                chat_id=update.effective_chat.id,
+                message_id=update.message.message_id
+            )
+    except Exception:
+        pass  # Silently fail if deletion isn't possible (e.g., message too old)
+
 async def safe_edit_message(query, text, reply_markup=None, parse_mode=None, context=None):
     """Safely edit a message, fallback to sending new message if edit fails"""
     try:
@@ -261,6 +278,9 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton(messages['settings'])]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     # Send message with reply keyboard
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
@@ -307,14 +327,21 @@ async def applications_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer()
 
     applications_url = "https://hustlexet.vercel.app/my-applications"
-    keyboard = [[InlineKeyboardButton("📋 View Applications", url=applications_url)]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+
+    # Reply keyboard with WebApp button (no inline keyboard)
+    reply_keyboard = [
+        [KeyboardButton("🌐 Open Applications", web_app=WebAppInfo(url=applications_url))],
+        [KeyboardButton("⬅️ Back to Menu")]
+    ]
+
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text="📋 *Applications*\n\nTap the button below to view and track all your applications on HustleX.",
         parse_mode="Markdown",
-        reply_markup=reply_markup
+        reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
     )
 
 async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -337,6 +364,9 @@ async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "Join *HustleX* today and turn your skills into opportunities! 🔥 "
         "Because here, *every hustle counts* 💼💎"
     )
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=about_text, 
@@ -427,6 +457,9 @@ async def settings_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton(messages['back'])]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"{messages['title']}\n\n{messages['instruction']}",
@@ -521,6 +554,9 @@ async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TY
         [KeyboardButton(msg['back'])]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"{msg['title']}\n\n{msg['instruction']}\n\n{msg['current']}\n{msg['tip']}",
@@ -601,6 +637,9 @@ async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
         [KeyboardButton("⬅️ Back to Settings")]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=account_text,
@@ -630,6 +669,9 @@ async def settings_cv_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         status_text = "❌ No CV uploaded"
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"📄 *My CV*\n\n"
@@ -687,6 +729,9 @@ async def settings_terms_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🌐 *Website:* https://hustlexet.vercel.app/"
     )
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=terms_text,
@@ -778,6 +823,9 @@ async def language_text_handler(update: Update, context: ContextTypes.DEFAULT_TY
         [KeyboardButton(messages['back'])]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"{messages['title']}\n\n{messages['message']}",
@@ -854,6 +902,9 @@ async def language_selection(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [KeyboardButton(messages['back'])]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"{messages['title']}\n\n{messages['message']}",
@@ -874,6 +925,9 @@ async def cv_upload_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton("⬅️ Back to Settings")]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text="📤 *Upload Your CV*\n\n"
@@ -911,6 +965,9 @@ async def cv_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [KeyboardButton("⬅️ Back to Settings")]
         ]
         
+        # Clean up old message to prevent keyboard interference
+        await try_delete_user_message(update, context)
+
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text=f"👁️ *View CV*\n\n"
@@ -931,6 +988,9 @@ async def cv_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [KeyboardButton("⬅️ Back to Settings")]
         ]
         
+        # Clean up old message to prevent keyboard interference
+        await try_delete_user_message(update, context)
+
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="👁️ *View CV*\n\n"
@@ -976,6 +1036,9 @@ async def cv_remove_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [KeyboardButton("⬅️ Back to Settings")]
         ]
         
+        # Clean up old message to prevent keyboard interference
+        await try_delete_user_message(update, context)
+
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="🗑️ *CV Removed Successfully*\n\n"
@@ -994,6 +1057,9 @@ async def cv_remove_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [KeyboardButton("⬅️ Back to Settings")]
         ]
         
+        # Clean up old message to prevent keyboard interference
+        await try_delete_user_message(update, context)
+
         await context.bot.send_message(
             chat_id=update.effective_chat.id,
             text="❌ *No CV Found*\n\n"
@@ -1069,6 +1135,9 @@ async def show_wizard_step(update: Update, context: ContextTypes.DEFAULT_TYPE, s
     else:
         text = f"{title}\n\n{prompt}"
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=text,
@@ -1110,6 +1179,9 @@ async def complete_profile_wizard(update: Update, context: ContextTypes.DEFAULT_
         [KeyboardButton("⬅️ Back to Account")]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=summary,
@@ -1251,6 +1323,9 @@ async def edit_age_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton(back_text)]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"{title}\n\n"
@@ -1318,6 +1393,9 @@ async def edit_photo_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         [KeyboardButton(back_text)]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"{title}\n\n"
@@ -1465,6 +1543,9 @@ async def account_notifications_handler(update: Update, context: ContextTypes.DE
         [KeyboardButton("⬅️ Back to Account")]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text="🔔 Notification Settings\n\n"
@@ -1487,6 +1568,9 @@ async def account_delete_handler(update: Update, context: ContextTypes.DEFAULT_T
         [KeyboardButton("❌ Cancel")]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"🗑️ *Delete Account*\n\n"
@@ -1557,6 +1641,9 @@ async def privacy_policy_handler(update: Update, context: ContextTypes.DEFAULT_T
         "🌐 *Website:* https://hustlexet.vercel.app/"
     )
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=privacy_text,
@@ -1670,6 +1757,9 @@ async def confirm_delete_account_handler(update: Update, context: ContextTypes.D
         [KeyboardButton("🏠 Start Over")]
     ]
     
+    # Clean up old message to prevent keyboard interference
+    await try_delete_user_message(update, context)
+
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
         text=f"✅ *Account Deleted Successfully*\n\n"
