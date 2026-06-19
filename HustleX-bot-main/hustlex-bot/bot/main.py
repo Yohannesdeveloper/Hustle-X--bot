@@ -63,6 +63,8 @@ def save_job(job_data):
 user_cvs = {}
 user_languages = {}
 user_profiles = {}
+registered_users = {}  # user_id -> {name, contact, registered_at}
+registration_state = {}  # user_id -> {'step': 'name'|'contact', 'data': {}}
 
 # Helper function to validate bot token
 async def validate_bot_token(token: str, context: ContextTypes.DEFAULT_TYPE) -> bool:
@@ -134,31 +136,198 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = user.id
     first_name = user.first_name or "there"
     
-    # Detailed welcome message
-    welcome_text = (
-        f"Hello {first_name}, welcome to HustleX! 🚀\n\n"
-        f"👤 My Profile: to register and update your profile\n\n"
-        f"📋 Applications: Track the status of all your applications\n\n"
-        f"ℹ️ About HustleX: Learn more about our platform\n\n"
-        f"⚙️ Settings: to customize your preferences\n\n"
-        f"Want more powerful features? Go visit our website HustleX\n"
-        f"🌐 https://hustlexet.vercel.app/"
-    )
-    
-    keyboard = [[KeyboardButton("📱 Menu")]]
-    
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            welcome_text,
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
-            disable_web_page_preview=True
+    # Check if user is already registered
+    if user_id in registered_users:
+        # Registered user - show normal welcome message with menu
+        welcome_text = (
+            f"Welcome back, {first_name}! 🚀\n\n"
+            f"👤 My Profile: to update your profile\n\n"
+            f"📋 Applications: Track the status of all your applications\n\n"
+            f"ℹ️ About HustleX: Learn more about our platform\n\n"
+            f"⚙️ Settings: to customize your preferences\n\n"
+            f"🌐 https://hustlexet.vercel.app/"
         )
+        
+        keyboard = [[KeyboardButton("📱 Menu")]]
+        
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                welcome_text,
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
+                disable_web_page_preview=True
+            )
+        else:
+            await update.effective_chat.send_message(
+                welcome_text,
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
+                disable_web_page_preview=True
+            )
     else:
-        await update.effective_chat.send_message(
-            welcome_text,
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
-            disable_web_page_preview=True
+        # New user - prompt to register
+        register_text = (
+            f"Hello {first_name}, welcome to HustleX! 🚀\n\n"
+            f"Before you can access the menu, you need to *register first*.\n\n"
+            f"📝 Registration is quick and free!\n\n"
+            f"Tap the button below to get started."
         )
+        
+        keyboard = [
+            [KeyboardButton("📝 Register")],
+            [KeyboardButton("ℹ️ About HustleX")]
+        ]
+        
+        if update.effective_message:
+            await update.effective_message.reply_text(
+                register_text,
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+        else:
+            await update.effective_chat.send_message(
+                register_text,
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
+                parse_mode="Markdown",
+                disable_web_page_preview=True
+            )
+
+# ---------------------------
+# Registration flow
+# ---------------------------
+async def register_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Start the registration process"""
+    user_id = update.effective_user.id
+    
+    if user_id in registered_users:
+        await start(update, context)
+        return
+    
+    # Initialize registration state
+    registration_state[user_id] = {'step': 'name', 'data': {}}
+    
+    await try_delete_user_message(update, context)
+    
+    keyboard = [[KeyboardButton("❌ Cancel Registration")]]
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="📝 *Registration - Step 1/2*\n\n"
+             "━━━━━━━━━━━━━━━━━━━━━━\n"
+             "Please enter your *full name*:\n\n"
+             "💡 This will be used on your freelancer profile.",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    )
+
+async def handle_registration_input(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle text input during registration"""
+    user_id = update.effective_user.id
+    message_text = update.message.text
+    
+    # Check if user is in registration flow
+    if user_id not in registration_state:
+        return False  # Not in registration mode
+    
+    state = registration_state[user_id]
+    
+    if message_text == "❌ Cancel Registration":
+        del registration_state[user_id]
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="❌ Registration cancelled.\n\nUse /start to begin again.",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("📱 Menu")]], resize_keyboard=True)
+        )
+        return True
+    
+    if state['step'] == 'name':
+        # Save name, ask for contact
+        state['data']['full_name'] = message_text
+        state['step'] = 'contact'
+        
+        keyboard = [[KeyboardButton("❌ Cancel Registration")]]
+        
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="📝 *Registration - Step 2/2*\n\n"
+                 "━━━━━━━━━━━━━━━━━━━━━━\n"
+                 f"Nice to meet you, *{message_text}*! 👋\n\n"
+                 "Please enter your *email address* or *phone number*:\n\n"
+                 "💡 This will be used for job application notifications.",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+        )
+        return True
+    
+    elif state['step'] == 'contact':
+        # Save contact, complete registration
+        state['data']['contact'] = message_text
+        state['data']['registered_at'] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Mark user as registered
+        registered_users[user_id] = state['data']
+        
+        # Also store in user_profiles for compatibility
+        if user_id not in user_profiles:
+            user_profiles[user_id] = {}
+        name_parts = state['data']['full_name'].split(' ', 1)
+        user_profiles[user_id]['first_name'] = name_parts[0]
+        if len(name_parts) > 1:
+            user_profiles[user_id]['last_name'] = name_parts[1]
+        user_profiles[user_id]['contact_info'] = message_text
+        
+        # Clear registration state
+        del registration_state[user_id]
+        
+        # Show success message
+        profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
+        keyboard = [
+            [KeyboardButton("👤 Complete Profile", web_app=WebAppInfo(url=profile_url))],
+            [KeyboardButton("📱 Menu")]
+        ]
+        
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="✅ *Registration Complete!*\n\n"
+                 "━━━━━━━━━━━━━━━━━━━━━━\n"
+                 f"🎉 Welcome to HustleX, *{state['data']['full_name']}*!\n\n"
+                 "You now have full access to all features:\n"
+                 "• 📋 Track your applications\n"
+                 "• 👤 Build your freelancer profile\n"
+                 "• ⚙️ Customize your preferences\n\n"
+                 "💡 *Tip:* Complete your profile on our website to increase your chances of getting hired!",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+        )
+        return True
+    
+    return False
+
+# ---------------------------
+# Registration check (gate for menu access)
+# ---------------------------
+async def check_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check if user is registered. If not, prompt them to register.
+    Returns True if user is registered, False if not."""
+    user_id = update.effective_user.id
+    
+    if user_id in registered_users:
+        return True  # User is registered, proceed
+    
+    # User is not registered - show prompt
+    keyboard = [
+        [KeyboardButton("📝 Register")],
+        [KeyboardButton("ℹ️ About HustleX")]
+    ]
+    
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="🔒 *Registration Required*\n\n"
+             "You need to register before accessing this feature.\n\n"
+             "📝 Tap the button below to register — it's quick and free!",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    )
+    return False
 
 # ---------------------------
 # Utility function for safe message editing
@@ -198,6 +367,10 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=None, con
 # Menu handler (works with both callback and text messages)
 # ---------------------------
 async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Check registration before showing menu
+    if not await check_registration(update, context):
+        return
+    
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     
@@ -312,14 +485,20 @@ async def about_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def profile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /profile command - opens account/profile settings"""
+    if not await check_registration(update, context):
+        return
     await account_edit_profile_handler(update, context)
 
 async def applications_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /applications command"""
+    if not await check_registration(update, context):
+        return
     await applications_cb(update, context)
 
 async def settings_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle /settings command"""
+    if not await check_registration(update, context):
+        return
     await settings_cb(update, context)
 
 # ---------------------------
@@ -2143,7 +2322,14 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # General Text Handler (for profile editing)
 # ---------------------------
 async def general_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle general text input when user is editing profile or in wizard mode"""
+    """Handle general text input when user is editing profile, in wizard mode, or registering"""
+    # Check registration input first (highest priority)
+    user_id = update.effective_user.id
+    if user_id in registration_state:
+        handled = await handle_registration_input(update, context)
+        if handled:
+            return
+    
     awaiting = context.user_data.get('awaiting_input')
     in_wizard = 'profile_wizard_step' in context.user_data
     
@@ -2153,6 +2339,18 @@ async def general_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
     elif awaiting:
         # Route to text_input_handler for legacy profile edits
         await text_input_handler(update, context)
+    elif user_id not in registered_users:
+        # Unregistered user typing random text - remind to register
+        keyboard = [
+            [KeyboardButton("📝 Register")],
+            [KeyboardButton("ℹ️ About HustleX")]
+        ]
+        await context.bot.send_message(
+            chat_id=update.effective_chat.id,
+            text="🔒 Please register first to access all features.\n\nTap *📝 Register* to get started.",
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+        )
     # If not awaiting any input, ignore (other handlers should have caught it)
 
 # ---------------------------
@@ -2221,6 +2419,10 @@ def main():
     app.add_handler(CallbackQueryHandler(confirm_delete_account_handler, pattern="^confirm_delete_account$"))
 
     # Reply keyboard text message handlers
+    # Registration button handler (must be early to catch unregistered users)
+    app.add_handler(MessageHandler(filters.Regex(r"^📝 Register$"), register_start))
+    app.add_handler(MessageHandler(filters.Regex(r"^❌ Cancel Registration$"), register_start))
+    
     # Menu button handlers (all languages)
     app.add_handler(MessageHandler(filters.Regex(r"^(📱 Menu|Menu|Menú|Menü|ሜኑ)$"), menu_text_handler))
     
