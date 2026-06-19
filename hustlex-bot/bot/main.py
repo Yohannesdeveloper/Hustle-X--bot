@@ -7,7 +7,7 @@ import logging
 import json
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telegram.error import TelegramError
 from urllib.parse import urlparse
@@ -481,7 +481,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [
         [InlineKeyboardButton(messages['profile'], web_app=WebAppInfo(url="https://hustlexet.vercel.app/freelancer-profile-setup")), 
          InlineKeyboardButton(messages['applications'], web_app=WebAppInfo(url="https://hustlexet.vercel.app/my-applications"))],
-        [InlineKeyboardButton(messages['about']), InlineKeyboardButton(messages['settings'])]
+        [InlineKeyboardButton(messages['about'], callback_data="about"), InlineKeyboardButton(messages['settings'], callback_data="settings")]
     ]
     reply_markup = InlineKeyboardMarkup(keyboard)
     
@@ -2415,7 +2415,18 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            BotCommand("start", "Main Menu"),
+            BotCommand("register_complete", "Complete Registration"),
+            BotCommand("menu", "Show Menu"),
+            BotCommand("about", "About HustleX"),
+            BotCommand("applications", "My Applications"),
+            BotCommand("settings", "Settings"),
+            BotCommand("profile", "My Profile")
+        ])
+
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     
     # Add error handler
     app.add_error_handler(error_handler)
