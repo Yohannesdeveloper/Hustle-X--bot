@@ -5,10 +5,28 @@ from fastapi.responses import HTMLResponse
 from pydantic import BaseModel
 import httpx
 from typing import Optional
+from pymongo import MongoClient
+from datetime import datetime
 
 app = FastAPI()
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 CHANNEL_ID = os.environ.get("CHANNEL_ID", "-1003194542999")
+MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://yohannesfk123:CKNujByIaepiwyGf@cluster0.mrtm8aj.mongodb.net/hustlex?retryWrites=true&w=majority&appName=Cluster0")
+
+# MongoDB connection
+mongo_client = None
+db = None
+
+def get_mongodb_connection():
+    global mongo_client, db
+    try:
+        if mongo_client is None:
+            mongo_client = MongoClient(MONGODB_URI)
+            db = mongo_client.get_database()
+        return db
+    except Exception as e:
+        print(f"Failed to connect to MongoDB: {e}")
+        return None
 
 def verify_init_data(init_data_str: str, bot_token: str) -> bool:
     # init_data_str is the raw query-like string Telegram sends (contains hash param)
@@ -35,6 +53,12 @@ async def save_profile(
     # Verify the init_data
     if not verify_init_data(init_data, BOT_TOKEN):
         raise HTTPException(status_code=401, detail="Invalid initData")
+    
+    # Extract user_id from init_data
+    params = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+    user_id = params.get("user")
+    if user_id:
+        user_id = int(user_id)
     
     # Process the profile data
     profile_data = {
@@ -69,6 +93,26 @@ async def save_profile(
         
         profile_data["profile_pic_file_path"] = pic_path
     
-    # TODO: Save profile_data to database
+    # Save profile to MongoDB
+    database = get_mongodb_connection()
+    if database and user_id:
+        try:
+            # Save user profile
+            database.profiles.update_one(
+                {"user_id": user_id},
+                {"$set": {**profile_data, "updated_at": datetime.utcnow()}},
+                upsert=True
+            )
+            
+            # Mark user as registered
+            database.registered_users.update_one(
+                {"user_id": user_id},
+                {"$set": {"user_id": user_id, "registered_at": datetime.utcnow()}},
+                upsert=True
+            )
+            
+            print(f"Profile saved and user {user_id} marked as registered")
+        except Exception as e:
+            print(f"Error saving to MongoDB: {e}")
     
     return {"status": "success", "message": "Profile saved successfully"}

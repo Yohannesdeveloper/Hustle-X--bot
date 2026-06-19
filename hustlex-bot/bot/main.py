@@ -4,6 +4,7 @@ JOB_TITLE, JOB_TYPE, WORK_LOCATION, SALARY, DEADLINE, DESCRIPTION, CLIENT_TYPE, 
 import os
 import re
 import logging
+import json
 from datetime import datetime
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove
@@ -163,6 +164,9 @@ async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.effective_chat.send_message(error_message)
         return
+    
+    # Also add to in-memory set for faster access
+    registered_users.add(user_id)
     
     # Language-specific confirmation messages
     confirmation_messages = {
@@ -361,6 +365,28 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             messages['title'],
             reply_markup=reply_markup
         )
+
+# ---------------------------
+# Web app data handler
+# ---------------------------
+async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle data sent from web app"""
+    if update.message.web_app_data:
+        try:
+            data = update.message.web_app_data.data
+            parsed_data = json.loads(data)
+            
+            if parsed_data.get('action') == 'profile_complete':
+                # User completed profile setup, add to registered users and show menu
+                user_id = update.effective_user.id
+                registered_users.add(user_id)
+                
+                # Show menu
+                await menu_callback(update, context)
+        except json.JSONDecodeError:
+            logger.error("Failed to parse web app data")
+        except Exception as e:
+            logger.error(f"Error handling web app data: {e}")
 
 # ---------------------------
 # Text message handler for menu
@@ -2333,6 +2359,9 @@ def main():
 
     # File/message handlers
     app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, file_handler))
+    
+    # Web app data handler
+    app.add_handler(MessageHandler(filters.StatusUpdate.WEB_APP_DATA, handle_web_app_data))
     
     # Text menu handler
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
