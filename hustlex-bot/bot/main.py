@@ -103,38 +103,40 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Language-specific welcome messages
     welcome_messages = {
         'en': {
-            'welcome': "Welcome to HustleX — tap Menu to open.",
-            'menu': "Menu"
+            'welcome': "Welcome to HustleX! 🚀\n\nClick the button below to register and get started.",
+            'register': "📝 Register"
         },
         'es': {
-            'welcome': "Bienvenido a HustleX — toca Menú para abrir.",
-            'menu': "Menú"
+            'welcome': "¡Bienvenido a HustleX! 🚀\n\nHaz clic en el botón de abajo para registrarte y comenzar.",
+            'register': "📝 Registrarse"
         },
         'fr': {
-            'welcome': "Bienvenue sur HustleX — appuyez sur Menu pour ouvrir.",
-            'menu': "Menu"
+            'welcome': "Bienvenue sur HustleX! 🚀\n\nCliquez sur le bouton ci-dessous pour vous inscrire et commencer.",
+            'register': "📝 S'inscrire"
         },
         'de': {
-            'welcome': "Willkommen bei HustleX — tippen Sie auf Menü zum Öffnen.",
-            'menu': "Menü"
+            'welcome': "Willkommen bei HustleX! 🚀\n\nKlicken Sie unten auf die Schaltfläche, um sich zu registrieren und zu beginnen.",
+            'register': "📝 Registrieren"
         },
         'it': {
-            'welcome': "Benvenuto su HustleX — tocca Menu per aprire.",
-            'menu': "Menu"
+            'welcome': "Benvenuto su HustleX! 🚀\n\nClicca sul pulsante sottostante per registrarti e iniziare.",
+            'register': "📝 Registrati"
         },
         'pt': {
-            'welcome': "Bem-vindo ao HustleX — toque em Menu para abrir.",
-            'menu': "Menu"
+            'welcome': "Bem-vindo ao HustleX! 🚀\n\nClique no botão abaixo para se registrar e começar.",
+            'register': "📝 Registrar"
         },
         'am': {
-            'welcome': "ወደ HustleX እንኳን ደህና መጡ — ለመክፈት ሜኑን ይንኩ።",
-            'menu': "ሜኑ"
+            'welcome': "ወደ HustleX እንኳን ደህና መጡ! 🚀\n\nለመመዝገብ እና ለመጀመር ከታች ያለውን አዝራር ይጫኑ።",
+            'register': "📝 መዝገብ"
         }
     }
     
     messages = welcome_messages.get(lang_code, welcome_messages['en'])
-    keyboard = [[KeyboardButton(messages['menu'])]]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    
+    # Create inline keyboard with register button
+    keyboard = [[InlineKeyboardButton(messages['register'], url="https://hustlexet.vercel.app/Register")]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     if update.effective_message:
         await update.effective_message.reply_text(
