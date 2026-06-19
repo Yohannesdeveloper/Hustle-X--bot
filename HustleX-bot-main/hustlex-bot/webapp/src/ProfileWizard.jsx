@@ -23,14 +23,12 @@ export default function ProfileWizard(){
 
     const res = await fetch('/api/profile', { method: 'POST', body: fd });
     if (res.ok) {
-      // Send data back to bot to trigger menu and close immediately
-      if (window.Telegram?.WebApp) {
-        window.Telegram.WebApp.sendData(JSON.stringify({action: 'profile_complete'}));
-        window.Telegram.WebApp.close();
-      } else {
-        alert('Profile saved successfully!');
-        window.close();
+      // Store initData for authentication on job-listings page
+      if (initData) {
+        localStorage.setItem('telegram_init_data', initData);
       }
+      // Redirect to job-listings as logged-in user
+      window.location.href = 'https://hustlexet.vercel.app/job-listings';
     } else {
       alert('Save failed');
     }
