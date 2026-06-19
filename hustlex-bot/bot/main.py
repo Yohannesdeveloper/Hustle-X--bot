@@ -49,11 +49,11 @@ def get_mongodb_connection():
 
 def is_user_registered(user_id: int) -> bool:
     """Check if user is registered in MongoDB"""
-    collection = get_mongodb_connection()
-    if collection is None:
+    database = get_mongodb_connection()
+    if database is None:
         return False
     try:
-        user = collection.find_one({"user_id": user_id})
+        user = database.registered_users.find_one({"user_id": user_id})
         return user is not None
     except Exception as e:
         logger.error(f"Error checking user registration: {e}")
@@ -282,59 +282,87 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Language-specific menu messages
     menu_messages = {
         'en': {
-            'title': "Choose a tab:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nChoose a tab:",
             'profile': "Profile",
+            'profile_desc': "Manage your freelancer profile and CV",
             'applications': "Applications",
+            'applications_desc': "View and manage your job applications",
             'about': "About HustleX",
+            'about_desc': "Learn more about HustleX platform",
             'settings': "Settings",
+            'settings_desc': "Configure your preferences and account",
             'error': "❌ Error: WebApp URL is unreachable. Please try again later or contact support."
         },
         'es': {
-            'title': "Elige una pestaña:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nElige una pestaña:",
             'profile': "Perfil",
+            'profile_desc': "Gestiona tu perfil de freelancer y CV",
             'applications': "Aplicaciones",
+            'applications_desc': "Ver y gestionar tus solicitudes de empleo",
             'about': "Acerca de HustleX",
+            'about_desc': "Conoce más sobre la plataforma HustleX",
             'settings': "Configuración",
+            'settings_desc': "Configura tus preferencias y cuenta",
             'error': "❌ Error: La URL de la aplicación web no es accesible. Por favor, inténtalo de nuevo más tarde o contacta con soporte."
         },
         'fr': {
-            'title': "Choisissez un onglet:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nChoisissez un onglet:",
             'profile': "Profil",
+            'profile_desc': "Gérez votre profil de freelance et CV",
             'applications': "Candidatures",
+            'applications_desc': "Voir et gérer vos candidatures",
             'about': "À propos de HustleX",
+            'about_desc': "En savoir plus sur la plateforme HustleX",
             'settings': "Paramètres",
+            'settings_desc': "Configurez vos préférences et compte",
             'error': "❌ Erreur: L'URL de l'application web est inaccessible. Veuillez réessayer plus tard ou contacter le support."
         },
         'de': {
-            'title': "Wählen Sie einen Tab:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nWählen Sie einen Tab:",
             'profile': "Profil",
+            'profile_desc': "Verwalten Sie Ihr Freelancer-Profil und CV",
             'applications': "Bewerbungen",
+            'applications_desc': "Bewerbungen anzeigen und verwalten",
             'about': "Über HustleX",
+            'about_desc': "Erfahren Sie mehr über die HustleX-Plattform",
             'settings': "Einstellungen",
+            'settings_desc': "Konfigurieren Sie Ihre Präferenzen und Konto",
             'error': "❌ Fehler: WebApp-URL ist nicht erreichbar. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Support."
         },
         'it': {
-            'title': "Scegli una scheda:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nScegli una scheda:",
             'profile': "Profilo",
+            'profile_desc': "Gestisci il tuo profilo freelance e CV",
             'applications': "Candidature",
+            'applications_desc': "Visualizza e gestisci le tue candidature",
             'about': "Informazioni su HustleX",
+            'about_desc': "Scopri di più sulla piattaforma HustleX",
             'settings': "Impostazioni",
+            'settings_desc': "Configura le tue preferenze e account",
             'error': "❌ Errore: L'URL dell'applicazione web non è raggiungibile. Riprova più tardi o contatta il supporto."
         },
         'pt': {
-            'title': "Escolha uma aba:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nEscolha uma aba:",
             'profile': "Perfil",
+            'profile_desc': "Gerencie seu perfil de freelancer e CV",
             'applications': "Candidaturas",
+            'applications_desc': "Visualize e gerencie suas candidaturas",
             'about': "Sobre o HustleX",
+            'about_desc': "Saiba mais sobre a plataforma HustleX",
             'settings': "Configurações",
+            'settings_desc': "Configure suas preferências e conta",
             'error': "❌ Erro: A URL da aplicação web não está acessível. Tente novamente mais tarde ou entre em contato com o suporte."
         },
         'am': {
-            'title': "አንድ ትር ይምረጡ:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nአንድ ትር ይምረጡ:",
             'profile': "መገለጫ",
+            'profile_desc': "የእርስዎን ፍሪላንሰር መገለጫ እና CV ያስተዳድሩ",
             'applications': "ማመልከቻዎች",
+            'applications_desc': "የስራ መጠየቅዎችን ይመልከቱ እና ያስተዳድሩ",
             'about': "ስለ HustleX",
+            'about_desc': "ስለ HustleX መድረክ የበለጠ ይወቁ",
             'settings': "ቅንብሮች",
+            'settings_desc': "የእርስዎን ምርጫዎች እና መለያ ያስተካክሉ",
             'error': "❌ ስህተት: የድር መተግበሪያ URL አይደርስም። እባክዎ ቆይተው ይሞክሩ ወይም ድጋፍን ያግኙ።"
         }
     }
@@ -355,14 +383,21 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
     
+    # Build menu message with descriptions
+    menu_text = f"{messages['title']}\n\n"
+    menu_text += f"👤 {messages['profile']}\n   {messages['profile_desc']}\n\n"
+    menu_text += f"📋 {messages['applications']}\n   {messages['applications_desc']}\n\n"
+    menu_text += f"ℹ️ {messages['about']}\n   {messages['about_desc']}\n\n"
+    menu_text += f"⚙️ {messages['settings']}\n   {messages['settings_desc']}"
+    
     if update.effective_message:
         await update.effective_message.reply_text(
-            messages['title'],
+            menu_text,
             reply_markup=reply_markup
         )
     else:
         await update.effective_chat.send_message(
-            messages['title'],
+            menu_text,
             reply_markup=reply_markup
         )
 
