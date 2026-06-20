@@ -7,6 +7,7 @@ import httpx
 from typing import Optional
 from pymongo import MongoClient
 from datetime import datetime
+from pathlib import Path
 
 app = FastAPI()
 
@@ -129,6 +130,15 @@ async def register_user_endpoint(payload: RegisterRequest):
                 upsert=True
             )
             print(f"User {user_id} successfully registered via Mini App")
+            
+            # Send success message to the user via Telegram bot
+            success_text = (
+                "\u2705 <b>Registration Successful!</b>\n\n"
+                f"Welcome, <b>{payload.first_name}</b>! \U0001f389\n\n"
+                "You now have full access to HustleX marketplace.\n"
+                "Use /start to open the main menu."
+            )
+            await send_telegram_message(user_id, success_text)
         except Exception as e:
             print(f"Error saving registration to MongoDB: {e}")
             raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
@@ -136,6 +146,38 @@ async def register_user_endpoint(payload: RegisterRequest):
         raise HTTPException(status_code=500, detail="Could not connect to database")
         
     return {"status": "success", "message": "Registration complete!"}
+
+# ── Serve registration page ────────────────────────────────────────
+@app.get("/Register", response_class=HTMLResponse)
+@app.get("/register", response_class=HTMLResponse)
+async def serve_register_page():
+    """Serve the registration form HTML for the Telegram Mini App."""
+    html_path = Path(__file__).resolve().parent.parent / "register.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+# ── Send Telegram message helper ──────────────────────────────────
+async def send_telegram_message(chat_id: int, text: str):
+    """Send a message to a Telegram user via the Bot API."""
+    if not BOT_TOKEN:
+        print("[WARN] BOT_TOKEN not set, cannot send Telegram message")
+        return False
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.post(url, json={
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "HTML"
+            })
+            data = resp.json()
+            if data.get("ok"):
+                print(f"Telegram message sent to {chat_id}")
+            else:
+                print(f"Failed to send Telegram message to {chat_id}: {data.get('description')}")
+            return data.get("ok", False)
+    except Exception as e:
+        print(f"Error sending Telegram message to {chat_id}: {e}")
+        return False
 
 @app.post("/api/freelancer-profile")
 async def save_freelancer_profile(request: Request):
@@ -280,3 +322,11 @@ async def save_freelancer_profile(request: Request):
         raise HTTPException(status_code=500, detail="Could not connect to database")
 
     return {"status": "success", "message": "Profile created"}
+
+# ── Vercel ASGI handler ───────────────────────────────────────────
+try:
+    from mangum import Mangum
+    handler = Mangum(app)
+except ImportError:
+    # Mangum not available (e.g. running locally with uvicorn)
+    handler = None

@@ -1,5 +1,11 @@
 {
+  "buildCommand": "",
+  "outputDirectory": ".",
   "rewrites": [
+    {
+      "source": "/api/(.*)",
+      "destination": "/api/main"
+    },
     {
       "source": "/Register",
       "destination": "/register.html"
