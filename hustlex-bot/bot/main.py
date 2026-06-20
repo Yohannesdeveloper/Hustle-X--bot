@@ -477,15 +477,15 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     messages = menu_messages.get(lang_code, menu_messages['en'])
     
-    # Use reply keyboard with only Main Menu option
+    # Use inline keyboard for web app buttons (WebAppInfo requires InlineKeyboardMarkup for mini apps)
     keyboard = [
-        [KeyboardButton("📱 Main Menu")]
+        [InlineKeyboardButton("📋 Applications", web_app=WebAppInfo(url="https://hustlexet.vercel.app/my-applications"))]
     ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    reply_markup = InlineKeyboardMarkup(keyboard)
     
     # Build simple menu message
     menu_text = f"{messages['title']}\n\n"
-    menu_text += "📱 Main Menu"
+    menu_text += "📋 Applications - View your job applications"
     
     if update.effective_message:
         await update.effective_message.reply_text(
