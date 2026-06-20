@@ -477,13 +477,12 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     messages = menu_messages.get(lang_code, menu_messages['en'])
     
-    # Use inline keyboard for web app buttons (WebAppInfo requires InlineKeyboardMarkup for mini apps)
+    # Use reply keyboard (attached keyboard) for menu options
     keyboard = [
-        [InlineKeyboardButton(messages['profile'], web_app=WebAppInfo(url="https://hustlexet.vercel.app/freelancer-profile-setup")), 
-         InlineKeyboardButton(messages['applications'], web_app=WebAppInfo(url="https://hustlexet.vercel.app/my-applications"))],
-        [InlineKeyboardButton(messages['about'], callback_data="about"), InlineKeyboardButton(messages['settings'], callback_data="settings")]
+        [KeyboardButton(messages['profile']), KeyboardButton(messages['applications'])],
+        [KeyboardButton(messages['about']), KeyboardButton(messages['settings'])]
     ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     # Build menu message with descriptions
     menu_text = f"{messages['title']}\n\n"
@@ -650,13 +649,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif action == 'profile':
-        # Profile is a web app
+        # Profile - send URL as clickable link
+        profile_url = "https://hustlexet.vercel.app/freelancer-profile-setup"
         await update.effective_message.reply_text(
-            "👤 *Profile*\n\nPlease use the web app to view your profile.",
+            f"👤 *Profile*\n\nClick here to access your profile: {profile_url}",
             parse_mode="Markdown"
         )
     elif action == 'applications':
-        await update.effective_message.reply_text("Applications: (placeholder)")
+        # Applications - send URL as clickable link
+        applications_url = "https://hustlexet.vercel.app/my-applications"
+        await update.effective_message.reply_text(
+            f"📋 *Applications*\n\nClick here to access your applications: {applications_url}",
+            parse_mode="Markdown"
+        )
     elif action == 'about':
         about_text = (
             "🚀 *About HustleX*\n\n"
@@ -788,12 +793,20 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Other tab callbacks
 # ---------------------------
 async def applications_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Show applications URL as clickable link
+    applications_url = "https://hustlexet.vercel.app/my-applications"
     if update.callback_query:
         q = update.callback_query
         await q.answer()
-        await q.edit_message_text("Applications: (placeholder)")
+        await q.edit_message_text(
+            f"📋 *Applications*\n\nClick here to access your applications: {applications_url}",
+            parse_mode="Markdown"
+        )
     else:
-        await update.effective_message.reply_text("Applications: (placeholder)")
+        await update.effective_message.reply_text(
+            f"📋 *Applications*\n\nClick here to access your applications: {applications_url}",
+            parse_mode="Markdown"
+        )
 
 async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     about_text = (
@@ -2432,14 +2445,10 @@ def main():
     app.add_error_handler(error_handler)
 
     async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Show profile web app
-        keyboard = [
-            [KeyboardButton("Open Profile", web_app=WebAppInfo(url="https://hustlexet.vercel.app/freelancer-profile-setup"))]
-        ]
-        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+        # Show profile URL as clickable link
+        profile_url = "https://hustlexet.vercel.app/freelancer-profile-setup"
         await update.effective_message.reply_text(
-            "👤 *Profile*\n\nClick the button below to open your profile:",
-            reply_markup=reply_markup,
+            f"👤 *Profile*\n\nClick here to access your profile: {profile_url}",
             parse_mode="Markdown"
         )
 
