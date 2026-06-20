@@ -477,26 +477,14 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     messages = menu_messages.get(lang_code, menu_messages['en'])
     
-    # Use inline keyboard for web app buttons (WebAppInfo requires InlineKeyboardMarkup for mini apps)
-    keyboard = [
-        [InlineKeyboardButton("📋 Applications", web_app=WebAppInfo(url="https://hustlexet.vercel.app/my-applications"))]
-    ]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
     # Build simple menu message
     menu_text = f"{messages['title']}\n\n"
     menu_text += "📋 Applications - View your job applications"
     
     if update.effective_message:
-        await update.effective_message.reply_text(
-            menu_text,
-            reply_markup=reply_markup
-        )
+        await update.effective_message.reply_text(menu_text)
     else:
-        await update.effective_chat.send_message(
-            menu_text,
-            reply_markup=reply_markup
-        )
+        await update.effective_chat.send_message(menu_text)
 
 # ---------------------------
 # Web app data handler
@@ -645,10 +633,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif action == 'profile':
-        # Profile - send URL as clickable link
+        # Profile - open as WebApp mini app
         profile_url = "https://hustlexet.vercel.app/freelancer-profile-setup"
+        keyboard = [[InlineKeyboardButton("👤 Open Profile", web_app=WebAppInfo(url=profile_url))]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
         await update.effective_message.reply_text(
-            f"👤 *Profile*\n\nClick here to access your profile: {profile_url}",
+            "👤 *Profile*\n\nClick the button below to open your profile setup:",
+            reply_markup=reply_markup,
             parse_mode="Markdown"
         )
     elif action == 'applications':
