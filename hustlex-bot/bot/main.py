@@ -477,19 +477,15 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     messages = menu_messages.get(lang_code, menu_messages['en'])
     
-    # Use reply keyboard (attached keyboard) for menu options
+    # Use reply keyboard with only Main Menu option
     keyboard = [
-        [KeyboardButton(messages['profile']), KeyboardButton(messages['applications'])],
-        [KeyboardButton(messages['about']), KeyboardButton(messages['settings'])]
+        [KeyboardButton("📱 Main Menu")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    # Build menu message with descriptions
+    # Build simple menu message
     menu_text = f"{messages['title']}\n\n"
-    menu_text += f"👤 {messages['profile']}\n   {messages['profile_desc']}\n\n"
-    menu_text += f"📋 {messages['applications']}\n   {messages['applications_desc']}\n\n"
-    menu_text += f"ℹ️ {messages['about']}\n   {messages['about_desc']}\n\n"
-    menu_text += f"⚙️ {messages['settings']}\n   {messages['settings_desc']}"
+    menu_text += "📱 Main Menu"
     
     if update.effective_message:
         await update.effective_message.reply_text(
