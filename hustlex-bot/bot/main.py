@@ -177,23 +177,30 @@ async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Also add to in-memory set for faster access
     registered_users.add(user_id)
     
-    # Language-specific confirmation messages
-    confirmation_messages = {
-        'en': "✅ Registration complete! Welcome to HustleX. Use /start to access the menu.",
-        'es': "✅ ¡Registro completado! Bienvenido a HustleX. Usa /start para acceder al menú.",
-        'fr': "✅ Inscription terminée! Bienvenue sur HustleX. Utilisez /start pour accéder au menu.",
-        'de': "✅ Registrierung abgeschlossen! Willkommen bei HustleX. Verwenden Sie /start für das Menü.",
-        'it': "✅ Registrazione completata! Benvenuto su HustleX. Usa /start per accedere al menu.",
-        'pt': "✅ Registro completo! Bem-vindo ao HustleX. Use /start para acessar o menu.",
-        'am': "✅ ምዝገባ ተጠናቋል! ወደ HustleX እንኳን ደህና መጡ. ሜኑን ለመድረስ /start ይጠቀሙ።"
+    # Request phone number sharing
+    phone_messages = {
+        'en': "✅ Registration complete! 🎉\n\nTo enhance your experience and help clients contact you, please share your phone number.",
+        'es': "✅ ¡Registro completado! 🎉\n\nPara mejorar tu experiencia y ayudar a los clientes a contactarte, por favor comparte tu número de teléfono.",
+        'fr': "✅ Inscription terminée! 🎉\n\nPour améliorer votre expérience et aider les clients à vous contacter, veuillez partager votre numéro de téléphone.",
+        'de': "✅ Registrierung abgeschlossen! 🎉\n\nUm Ihre Erfahrung zu verbessern und Kunden zu helfen, Sie zu kontaktieren, teilen Sie bitte Ihre Telefonnummer mit.",
+        'it': "✅ Registrazione completata! 🎉\n\nPer migliorare la tua esperienza e aiutare i clienti a contattarti, condividi il tuo numero di telefono.",
+        'pt': "✅ Registro completo! 🎉\n\nPara melhorar sua experiência e ajudar os clientes a entrar em contato, por favor compartilhe seu número de telefone.",
+        'am': "✅ ምዝገባ ተጠናቋል! 🎉\n\nለደንበኞች የሚያስችሉዎን እና ልዩ ተሞክሮ ለማግኘት እባክዎ ስልክ ቁጥርዎን ያጋሩ።"
     }
     
-    message = confirmation_messages.get(lang_code, confirmation_messages['en'])
+    message = phone_messages.get(lang_code, phone_messages['en'])
+    
+    # Create keyboard with Share and Cancel buttons
+    keyboard = [
+        [KeyboardButton("📱 Share Phone Number", request_contact=True)],
+        [KeyboardButton("❌ Cancel")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
     
     if update.effective_message:
-        await update.effective_message.reply_text(message)
+        await update.effective_message.reply_text(message, reply_markup=reply_markup)
     else:
-        await update.effective_chat.send_message(message)
+        await update.effective_chat.send_message(message, reply_markup=reply_markup)
 
 # ---------------------------
 # /start command
@@ -210,11 +217,43 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Check if user is already registered in MongoDB
     if is_user_registered(user_id):
-        # User is registered, show menu
+        # User is registered, check if they have phone number and redirect to job details
+        collection = get_mongodb_connection()
+        if collection:
+            try:
+                user_data = collection.find_one({"user_id": user_id})
+                if user_data and user_data.get('phone_number'):
+                    # User has phone number, redirect directly to job details
+                    job_id = '6a31521bf3edf7daab32416c'  # Default job ID
+                    job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
+                    keyboard = [[InlineKeyboardButton("📋 View Job Details", web_app=WebAppInfo(url=job_details_url))]]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    
+                    welcome_messages = {
+                        'en': f"👋 Welcome back! 🎉\n\nYou're already registered. View available jobs below.",
+                        'es': f"👋 ¡Bienvenido de nuevo! 🎉\n\nYa estás registrado. Ver trabajos disponibles abajo.",
+                        'fr': f"👋 Bon retour! 🎉\n\nVous êtes déjà inscrit. Voir les emplois disponibles ci-dessous.",
+                        'de': f"👋 Willkommen zurück! 🎉\n\nSie sind bereits registriert. Verfügbare Jobs unten anzeigen.",
+                        'it': f"👋 Bentornato! 🎉\n\nSei già registrato. Vedi i lavori disponibili sotto.",
+                        'pt': f"👋 Bem-vindo de volta! 🎉\n\nVocê já está registrado. Ver vagas disponíveis abaixo.",
+                        'am': f"👋 እንኳን ደህና መጡ! 🎉\n\nቀሪዎ ተመዝግበዋል። የሚገኙ ስራዎችን ከታች ይመልከቱ።"
+                    }
+                    
+                    message = welcome_messages.get(lang_code, welcome_messages['en'])
+                    
+                    if update.effective_message:
+                        await update.effective_message.reply_text(message, reply_markup=reply_markup)
+                    else:
+                        await update.effective_chat.send_message(message, reply_markup=reply_markup)
+                    return
+            except Exception as e:
+                logger.error(f"Error checking user data: {e}")
+        
+        # User is registered but no phone number, show menu
         await menu_callback(update, context)
         return
     
-    # User is not registered, show register inline keyboard
+    # User is not registered, show register WebApp button
     # Language-specific welcome messages
     welcome_messages = {
         'en': {
@@ -477,14 +516,85 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     messages = menu_messages.get(lang_code, menu_messages['en'])
     
-    # Build simple menu message
+    # Build menu with attached keyboard
+    keyboard = [
+        [KeyboardButton(f"ℹ️ {messages['about']}"), KeyboardButton(f"👤 {messages['profile']}")],
+        [KeyboardButton(f"📋 {messages['applications']}"), KeyboardButton(f"⚙️ {messages['settings']}")]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+    
+    # Build menu message
     menu_text = f"{messages['title']}\n\n"
-    menu_text += "📋 Applications - View your job applications"
+    menu_text += f"📋 {messages['applications']} - {messages['applications_desc']}\n"
+    menu_text += f"👤 {messages['profile']} - {messages['profile_desc']}\n"
+    menu_text += f"⚙️ {messages['settings']} - {messages['settings_desc']}\n"
+    menu_text += f"ℹ️ {messages['about']} - {messages['about_desc']}"
     
     if update.effective_message:
-        await update.effective_message.reply_text(menu_text)
+        await update.effective_message.reply_text(menu_text, reply_markup=reply_markup)
     else:
-        await update.effective_chat.send_message(menu_text)
+        await update.effective_chat.send_message(menu_text, reply_markup=reply_markup)
+
+# ---------------------------
+# Contact handler for phone number sharing
+# ---------------------------
+async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle phone number contact sharing"""
+    user_id = update.effective_user.id
+    contact = update.message.contact
+    
+    if contact:
+        # Save phone number to database
+        collection = get_mongodb_connection()
+        if collection:
+            try:
+                collection.update_one(
+                    {"user_id": user_id},
+                    {"$set": {"phone_number": contact.phone_number}}
+                )
+                logger.info(f"Phone number saved for user {user_id}")
+            except Exception as e:
+                logger.error(f"Error saving phone number: {e}")
+        
+        # Redirect to freelancer profile setup
+        profile_setup_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
+        keyboard = [[InlineKeyboardButton("📝 Complete Profile Setup", web_app=WebAppInfo(url=profile_setup_url))]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        profile_messages = {
+            'en': "✅ Phone number saved! 📱\n\nNext step: Complete your freelancer profile setup to start applying for jobs.",
+            'es': "✅ ¡Número de teléfono guardado! 📱\n\nSiguiente paso: Completa la configuración de tu perfil de freelancer para empezar a postular a trabajos.",
+            'fr': "✅ Numéro de téléphone enregistré! 📱\n\nÉtape suivante: Complétez la configuration de votre profil de freelance pour commencer à postuler aux offres.",
+            'de': "✅ Telefonnummer gespeichert! 📱\n\nNächster Schritt: Vervollständigen Sie Ihr Freelancer-Profil, um mit der Bewerbung auf Jobs zu beginnen.",
+            'it': "✅ Numero di telefono salvato! 📱\n\nProssimo passaggio: Completa la configurazione del tuo profilo freelance per iniziare a candidarti per i lavori.",
+            'pt': "✅ Número de telefone salvo! 📱\n\nPróxima etapa: Complete a configuração do seu perfil de freelancer para começar a se candidatar a vagas.",
+            'am': "✅ ስልክ ቁጥር ተቀምጧል! 📱\n\nቀጣይ ደረጃ: ለስራ መጠየቅ የፍሪላንሰር መገለጫዎን ያጠናቅቁ።"
+        }
+        
+        lang_code = user_languages.get(user_id, 'en')
+        message = profile_messages.get(lang_code, profile_messages['en'])
+        
+        await update.message.reply_text(message, reply_markup=reply_markup)
+    else:
+        # User cancelled, still redirect to profile setup
+        profile_setup_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
+        keyboard = [[InlineKeyboardButton("📝 Complete Profile Setup", web_app=WebAppInfo(url=profile_setup_url))]]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        
+        cancel_messages = {
+            'en': "❌ Phone number sharing cancelled.\n\nYou can still complete your profile setup to start applying for jobs.",
+            'es': "❌ Compartir número de teléfono cancelado.\n\nAún puedes completar la configuración de tu perfil para empezar a postular a trabajos.",
+            'fr': "❌ Partage du numéro de téléphone annulé.\n\nVous pouvez toujours compléter la configuration de votre profil pour commencer à postuler aux offres.",
+            'de': "❌ Teilen der Telefonnummer abgebrochen.\n\nSie können immer noch Ihr Profil vervollständigen, um mit der Bewerbung auf Jobs zu beginnen.",
+            'it': "❌ Condivisione del numero di telefono annullata.\n\nPuoi ancora completare la configurazione del tuo profilo per iniziare a candidarti per i lavori.",
+            'pt': "❌ Compartilhamento do número de telefone cancelado.\n\nVocê ainda pode completar a configuração do seu perfil para começar a se candidatar a vagas.",
+            'am': "❌ ስልክ ቁጥር ማጋራት ተሰርዟል።\n\nለስራ መጠየቅ መገለጫዎን ማጠናቅቅ ይችላሉ።"
+        }
+        
+        lang_code = user_languages.get(user_id, 'en')
+        message = cancel_messages.get(lang_code, cancel_messages['en'])
+        
+        await update.message.reply_text(message, reply_markup=reply_markup)
 
 # ---------------------------
 # Web app data handler
@@ -497,12 +607,29 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             parsed_data = json.loads(data)
             
             if parsed_data.get('action') == 'profile_complete':
-                # User completed profile setup, add to registered users and show menu
+                # User completed profile setup, redirect to job details
                 user_id = update.effective_user.id
-                registered_users.add(user_id)
+                job_id = parsed_data.get('job_id', '6a31521bf3edf7daab32416c')  # Default job ID
                 
-                # Show menu
-                await menu_callback(update, context)
+                # Redirect to job details page
+                job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
+                keyboard = [[InlineKeyboardButton("📋 View Job Details", web_app=WebAppInfo(url=job_details_url))]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                
+                success_messages = {
+                    'en': "✅ Profile setup complete! 🎉\n\nYou can now view and apply for jobs.",
+                    'es': "✅ ¡Configuración de perfil completada! 🎉\n\nAhora puedes ver y postular a trabajos.",
+                    'fr': "✅ Configuration du profil terminée! 🎉\n\nVous pouvez maintenant voir et postuler aux offres.",
+                    'de': "✅ Profilkonfiguration abgeschlossen! 🎉\n\nSie können jetzt Jobs anzeigen und sich bewerben.",
+                    'it': "✅ Configurazione del profilo completata! 🎉\n\nOra puoi visualizzare e candidarti per i lavori.",
+                    'pt': "✅ Configuração do perfil concluída! 🎉\n\nAgora você pode visualizar e se candidatar a vagas.",
+                    'am': "✅ የመገለጫ ቅንብር ተጠናቋል! 🎉\n\nአሁን ስራዎችን ማየት እና መጠየቅ ይችላሉ።"
+                }
+                
+                lang_code = user_languages.get(user_id, 'en')
+                message = success_messages.get(lang_code, success_messages['en'])
+                
+                await update.message.reply_text(message, reply_markup=reply_markup)
         except json.JSONDecodeError:
             logger.error("Failed to parse web app data")
         except Exception as e:
@@ -896,7 +1023,7 @@ async def settings_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [KeyboardButton(messages['cv']), KeyboardButton(messages['terms'])],
         [KeyboardButton(messages['back'])]
     ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     if update.callback_query:
         q = update.callback_query
@@ -996,10 +1123,8 @@ async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TY
         [KeyboardButton("🇪🇹 አማርኛ (Amharic)")],
         [KeyboardButton(msg['back'])]
     ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
-    # Also add these language options to the handle_text function's menu_texts dict!
-    # Let's update handle_text later, but first handle the current function!
     if update.callback_query:
         q = update.callback_query
         await q.answer()
@@ -1023,7 +1148,7 @@ async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
         [KeyboardButton("👤 View Profile"), KeyboardButton("🔔 Notifications")],
         [KeyboardButton("🗑️ Delete Account"), KeyboardButton("⬅️ Back to Settings")]
     ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     if update.callback_query:
         q = update.callback_query
@@ -1068,7 +1193,7 @@ async def settings_cv_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [KeyboardButton("📤 Upload New CV"), KeyboardButton("⬅️ Back to Settings")]
         ]
         status_text = "❌ No CV uploaded"
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     
     if update.callback_query:
         q = update.callback_query
@@ -2418,12 +2543,7 @@ def main():
     async def post_init(application):
         await application.bot.set_my_commands([
             BotCommand("start", "Main Menu"),
-            BotCommand("register_complete", "Complete Registration"),
-            BotCommand("menu", "Show Menu"),
-            BotCommand("about", "About HustleX"),
-            BotCommand("applications", "My Applications"),
-            BotCommand("settings", "Settings"),
-            BotCommand("profile", "My Profile")
+            BotCommand("register_complete", "Complete Registration")
         ])
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
@@ -2442,11 +2562,9 @@ def main():
     # Command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("register_complete", register_complete))
-    app.add_handler(CommandHandler("menu", menu_callback))
-    app.add_handler(CommandHandler("about", about_cb))
-    app.add_handler(CommandHandler("applications", applications_cb))
-    app.add_handler(CommandHandler("settings", settings_cb))
-    app.add_handler(CommandHandler("profile", profile_cmd))
+    
+    # Contact handler for phone number sharing
+    app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
     # Job Posting ConversationHandler
     job_post_conv = ConversationHandler(
