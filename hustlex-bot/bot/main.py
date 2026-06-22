@@ -6,6 +6,7 @@ import re
 import logging
 import json
 from datetime import datetime
+from typing import Optional
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
@@ -31,64 +32,152 @@ MONGODB_URI = os.getenv("MONGODB_URI", "mongodb+srv://yohannesfk123:CKNujByIaepi
 # MongoDB connection setup
 mongo_client = None
 db = None
-registered_users_collection = None
+DB_NAME = "hustlex"
+DEFAULT_JOB_ID = "6a31521bf3edf7daab32416c"
+BOT_USERNAME = os.getenv("BOT_USERNAME", "HustleXet_bot")
 
-def get_mongodb_connection():
-    """Get MongoDB connection and collection"""
-    global mongo_client, db, registered_users_collection
+def get_db():
+    """Return MongoDB database handle."""
+    global mongo_client, db
     try:
         if mongo_client is None:
-            # Add connection pooling and timeout settings for faster connections
             mongo_client = MongoClient(
                 MONGODB_URI,
                 maxPoolSize=50,
                 minPoolSize=5,
-                connectTimeoutMS=5000,
-                socketTimeoutMS=5000,
-                serverSelectionTimeoutMS=5000
+                connectTimeoutMS=10000,
+                socketTimeoutMS=10000,
+                serverSelectionTimeoutMS=10000,
             )
-            db = mongo_client.get_database()
-            registered_users_collection = db.registered_users
+            db = mongo_client[DB_NAME]
             logger.info("Successfully connected to MongoDB")
-        return registered_users_collection
+        return db
     except ConnectionFailure as e:
         logger.error(f"Failed to connect to MongoDB: {e}")
         return None
 
 def is_user_registered(user_id: int) -> bool:
-    """Check if user is registered in MongoDB"""
-    database = get_mongodb_connection()
+    """Check if user completed registration in MongoDB."""
+    database = get_db()
     if database is None:
         return False
     try:
-        user = database.registered_users.find_one({"user_id": user_id})
-        return user is not None
+        return database.registered_users.find_one({"user_id": user_id}) is not None
     except Exception as e:
         logger.error(f"Error checking user registration: {e}")
         return False
 
+def get_user_profile(user_id: int):
+    database = get_db()
+    if database is None:
+        return None
+    try:
+        return database.profiles.find_one({"user_id": user_id})
+    except Exception as e:
+        logger.error(f"Error loading profile for {user_id}: {e}")
+        return None
+
+def has_user_phone(user_id: int) -> bool:
+    profile = get_user_profile(user_id)
+    if not profile:
+        return False
+    return bool(profile.get("phone") or profile.get("phone_number"))
+
+def save_user_phone(user_id: int, phone: str) -> bool:
+    database = get_db()
+    if database is None:
+        return False
+    try:
+        database.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"phone": phone, "phone_number": phone, "updated_at": datetime.utcnow()}},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error saving phone for {user_id}: {e}")
+        return False
+
+def is_profile_setup_complete(user_id: int) -> bool:
+    profile = get_user_profile(user_id)
+    if not profile:
+        return False
+    return bool(profile.get("name") and profile.get("age") and profile.get("sex"))
+
+def parse_job_id_from_start(args) -> Optional[str]:
+    if not args:
+        return None
+    param = args[0]
+    if param.startswith("job_"):
+        return param[4:]
+    if param.startswith("apply_"):
+        return param[6:]
+    return param if len(param) == 24 else None
+
+def get_pending_job_id(context: ContextTypes.DEFAULT_TYPE) -> str:
+    return context.user_data.get("pending_job_id") or DEFAULT_JOB_ID
+
 def register_user(user_id: int, username: str = None, first_name: str = None) -> bool:
-    """Register user in MongoDB"""
-    collection = get_mongodb_connection()
-    if collection is None:
+    """Register user in MongoDB."""
+    database = get_db()
+    if database is None:
         return False
     try:
         user_data = {
             "user_id": user_id,
             "username": username,
             "first_name": first_name,
-            "registered_at": datetime.utcnow()
+            "registered_at": datetime.utcnow(),
         }
-        collection.update_one(
+        database.registered_users.update_one(
             {"user_id": user_id},
             {"$setOnInsert": user_data},
-            upsert=True
+            upsert=True,
         )
         logger.info(f"User {user_id} registered successfully")
         return True
     except Exception as e:
         logger.error(f"Error registering user: {e}")
         return False
+
+def save_profile_fields(user_id: int, fields: dict) -> bool:
+    database = get_db()
+    if database is None:
+        return False
+    try:
+        database.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {**fields, "updated_at": datetime.utcnow()}},
+            upsert=True,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"Error saving profile for {user_id}: {e}")
+        return False
+
+def save_job_to_db(job_data: dict) -> str:
+    from bson import ObjectId
+    database = get_db()
+    if database is None:
+        return DEFAULT_JOB_ID
+    job_id = str(ObjectId())
+    doc = {
+        "job_id": job_id,
+        "job_title": job_data.get("job_title"),
+        "job_type": job_data.get("job_type"),
+        "work_location": job_data.get("work_location"),
+        "salary": job_data.get("salary"),
+        "deadline": job_data.get("deadline"),
+        "description": job_data.get("description"),
+        "client_type": job_data.get("client_type"),
+        "company_name": job_data.get("company_name"),
+        "verified": job_data.get("verified"),
+        "previous_jobs": job_data.get("previous_jobs"),
+        "job_link": job_data.get("job_link"),
+        "created_at": datetime.utcnow(),
+    }
+    database.jobs.insert_one(doc)
+    return job_id
 
 # Simple in-memory storage for CV data and user preferences (replace with database in production)
 user_cvs = {}
@@ -153,15 +242,128 @@ def escape_markdown_v2(text: str) -> str:
     special_chars = r'([_\*\[\]\(\)~`>\#\+\-=\|\{\}\.\!])'
     return re.sub(special_chars, r'\\\1', str(text))
 
+async def show_registration_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Show registration WebApp for unregistered users."""
+    user_id = update.effective_user.id
+    lang_code = user_languages.get(user_id, 'en')
+    welcome_messages = {
+        'en': {
+            'welcome': (
+                "👋 Welcome to HustleX! 🚀\n\n"
+                "To access the main menu, please register first.\n\n"
+                "1️⃣ Click 📝 Register below\n"
+                "2️⃣ Fill in your details\n"
+                "3️⃣ Accept the Terms of Service\n"
+                "4️⃣ Submit to complete registration"
+            ),
+            'register': "📝 Register",
+        },
+    }
+    messages = welcome_messages.get(lang_code, welcome_messages['en'])
+    register_url = f"{WEBAPP_URL.rstrip('/')}/Register"
+    keyboard = [[InlineKeyboardButton(messages['register'], web_app=WebAppInfo(url=register_url))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    target = update.effective_message or update.effective_chat
+    if update.effective_message:
+        await update.effective_message.reply_text(messages['welcome'], reply_markup=reply_markup)
+    else:
+        await update.effective_chat.send_message(messages['welcome'], reply_markup=reply_markup)
+
+async def require_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    user_id = update.effective_user.id
+    if is_user_registered(user_id):
+        registered_users.add(user_id)
+        return True
+    await show_registration_prompt(update, context)
+    return False
+
+async def prompt_phone_share(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang_code = user_languages.get(user_id, 'en')
+    context.user_data['awaiting_phone'] = True
+    phone_messages = {
+        'en': "✅ Registration complete! 🎉\n\nPlease share your phone number so clients can reach you, or tap Cancel to skip.",
+    }
+    message = phone_messages.get(lang_code, phone_messages['en'])
+    keyboard = [
+        [KeyboardButton("📱 Share Phone Number", request_contact=True)],
+        [KeyboardButton("❌ Cancel")],
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
+    chat = update.effective_chat
+    if update.effective_message:
+        await update.effective_message.reply_text(message, reply_markup=reply_markup)
+    else:
+        await chat.send_message(message, reply_markup=reply_markup)
+
+async def prompt_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    lang_code = user_languages.get(user_id, 'en')
+    job_id = get_pending_job_id(context)
+    profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?job_id={job_id}"
+    keyboard = [[InlineKeyboardButton("👤 Complete Profile Setup", web_app=WebAppInfo(url=profile_url))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    messages = {
+        'en': "📝 Next step: complete your freelancer profile to start applying for jobs.",
+    }
+    message = messages.get(lang_code, messages['en'])
+    chat = update.effective_chat
+    if update.effective_message:
+        await update.effective_message.reply_text(message, reply_markup=reply_markup)
+    else:
+        await chat.send_message(message, reply_markup=reply_markup)
+
+async def send_job_details(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str = None):
+    job_id = job_id or get_pending_job_id(context)
+    job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
+    keyboard = [[InlineKeyboardButton("📋 View Job Details", web_app=WebAppInfo(url=job_details_url))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    user_id = update.effective_user.id
+    lang_code = user_languages.get(user_id, 'en')
+    messages = {
+        'en': "👋 Welcome! Here are the job details:",
+    }
+    message = messages.get(lang_code, messages['en'])
+    if update.effective_message:
+        await update.effective_message.reply_text(message, reply_markup=reply_markup)
+    else:
+        await update.effective_chat.send_message(message, reply_markup=reply_markup)
+
+async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Route a registered user through phone → profile → job details."""
+    user_id = update.effective_user.id
+    registered_users.add(user_id)
+    job_id = parse_job_id_from_start(context.args) or context.user_data.get("pending_job_id")
+    if job_id:
+        context.user_data["pending_job_id"] = job_id
+
+    if job_id and has_user_phone(user_id):
+        await send_job_details(update, context, job_id)
+        return
+
+    if context.user_data.get("awaiting_phone"):
+        return
+
+    if not has_user_phone(user_id):
+        await prompt_phone_share(update, context)
+        return
+
+    if not is_profile_setup_complete(user_id):
+        await prompt_profile_setup(update, context)
+        return
+
+    if job_id:
+        await send_job_details(update, context, job_id)
+    else:
+        await menu_callback(update, context)
+
 # ---------------------------
 # /register_complete command
 # ---------------------------
 async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mark user as registered after completing registration on the website"""
     user_id = update.effective_user.id
-    lang_code = user_languages.get(user_id, 'en')
     
-    # Register user in MongoDB
     username = update.effective_user.username
     first_name = update.effective_user.first_name
     success = register_user(user_id, username, first_name)
@@ -174,33 +376,8 @@ async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_chat.send_message(error_message)
         return
     
-    # Also add to in-memory set for faster access
     registered_users.add(user_id)
-    
-    # Request phone number sharing
-    phone_messages = {
-        'en': "✅ Registration complete! 🎉\n\nTo enhance your experience and help clients contact you, please share your phone number.",
-        'es': "✅ ¡Registro completado! 🎉\n\nPara mejorar tu experiencia y ayudar a los clientes a contactarte, por favor comparte tu número de teléfono.",
-        'fr': "✅ Inscription terminée! 🎉\n\nPour améliorer votre expérience et aider les clients à vous contacter, veuillez partager votre numéro de téléphone.",
-        'de': "✅ Registrierung abgeschlossen! 🎉\n\nUm Ihre Erfahrung zu verbessern und Kunden zu helfen, Sie zu kontaktieren, teilen Sie bitte Ihre Telefonnummer mit.",
-        'it': "✅ Registrazione completata! 🎉\n\nPer migliorare la tua esperienza e aiutare i clienti a contattarti, condividi il tuo numero di telefono.",
-        'pt': "✅ Registro completo! 🎉\n\nPara melhorar sua experiência e ajudar os clientes a entrar em contato, por favor compartilhe seu número de telefone.",
-        'am': "✅ ምዝገባ ተጠናቋል! 🎉\n\nለደንበኞች የሚያስችሉዎን እና ልዩ ተሞክሮ ለማግኘት እባክዎ ስልክ ቁጥርዎን ያጋሩ።"
-    }
-    
-    message = phone_messages.get(lang_code, phone_messages['en'])
-    
-    # Create keyboard with Share and Cancel buttons
-    keyboard = [
-        [KeyboardButton("📱 Share Phone Number", request_contact=True)],
-        [KeyboardButton("❌ Cancel")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=True)
-    
-    if update.effective_message:
-        await update.effective_message.reply_text(message, reply_markup=reply_markup)
-    else:
-        await update.effective_chat.send_message(message, reply_markup=reply_markup)
+    await prompt_phone_share(update, context)
 
 # ---------------------------
 # /start command
@@ -213,194 +390,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     user_id = update.effective_user.id
-    lang_code = user_languages.get(user_id, 'en')
-    
-    # Check if user is already registered in MongoDB
+
+    job_id = parse_job_id_from_start(context.args)
+    if job_id:
+        context.user_data["pending_job_id"] = job_id
+
     if is_user_registered(user_id):
-        # User is registered, check if they have phone number and redirect to job details
-        collection = get_mongodb_connection()
-        if collection:
-            try:
-                user_data = collection.find_one({"user_id": user_id})
-                if user_data and user_data.get('phone_number'):
-                    # User has phone number, redirect directly to job details
-                    job_id = '6a31521bf3edf7daab32416c'  # Default job ID
-                    job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
-                    keyboard = [[InlineKeyboardButton("📋 View Job Details", web_app=WebAppInfo(url=job_details_url))]]
-                    reply_markup = InlineKeyboardMarkup(keyboard)
-                    
-                    welcome_messages = {
-                        'en': f"👋 Welcome back! 🎉\n\nYou're already registered. View available jobs below.",
-                        'es': f"👋 ¡Bienvenido de nuevo! 🎉\n\nYa estás registrado. Ver trabajos disponibles abajo.",
-                        'fr': f"👋 Bon retour! 🎉\n\nVous êtes déjà inscrit. Voir les emplois disponibles ci-dessous.",
-                        'de': f"👋 Willkommen zurück! 🎉\n\nSie sind bereits registriert. Verfügbare Jobs unten anzeigen.",
-                        'it': f"👋 Bentornato! 🎉\n\nSei già registrato. Vedi i lavori disponibili sotto.",
-                        'pt': f"👋 Bem-vindo de volta! 🎉\n\nVocê já está registrado. Ver vagas disponíveis abaixo.",
-                        'am': f"👋 እንኳን ደህና መጡ! 🎉\n\nቀሪዎ ተመዝግበዋል። የሚገኙ ስራዎችን ከታች ይመልከቱ።"
-                    }
-                    
-                    message = welcome_messages.get(lang_code, welcome_messages['en'])
-                    
-                    if update.effective_message:
-                        await update.effective_message.reply_text(message, reply_markup=reply_markup)
-                    else:
-                        await update.effective_chat.send_message(message, reply_markup=reply_markup)
-                    return
-            except Exception as e:
-                logger.error(f"Error checking user data: {e}")
-        
-        # User is registered but no phone number, show menu
-        await menu_callback(update, context)
+        await route_registered_user(update, context)
         return
-    
-    # User is not registered, show register WebApp button
-    # Language-specific welcome messages
-    welcome_messages = {
-        'en': {
-            'welcome': (
-                "👋 Welcome to HustleX! 🚀\n\n"
-                "HustleX is a premium marketplace connecting top-tier freelancers with amazing opportunities. 💼✨\n\n"
-                "To get started, you must first register your account. Here is how you can do it:\n"
-                "1️⃣ Click the 📝 Register button below.\n"
-                "2️⃣ Fill out your basic details in the Mini App (First Name, Last Name, Gender, Date of Birth, Country, City).\n"
-                "3️⃣ Accept the Terms of Service.\n"
-                "4️⃣ Click the Register button to finalize your profile!\n\n"
-                "Once registered, you'll gain full access to:\n"
-                "👤 Freelancer Profile & CV Uploads\n"
-                "📋 Job Postings & Match Notifications\n"
-                "🤝 Direct Communication with Clients\n"
-                "💼 A dashboard to track your application status\n\n"
-                "Let's begin your journey! Click below to set up your account. 👇"
-            ),
-            'register': "📝 Register"
-        },
-        'es': {
-            'welcome': (
-                "👋 ¡Bienvenido a HustleX! 🚀\n\n"
-                "HustleX es un mercado premium que conecta a freelancers de nivel superior con oportunidades increíbles. 💼✨\n\n"
-                "Para comenzar, primero debes registrar tu cuenta. Así es como puedes hacerlo:\n"
-                "1️⃣ Haz clic en el botón 📝 Registrarse abajo.\n"
-                "2️⃣ Completa tus datos básicos en la Mini App (Nombre, Apellido, Género, Fecha de nacimiento, País, Ciudad).\n"
-                "3️⃣ Acepta los Términos de servicio.\n"
-                "4️⃣ ¡Haz clic en el botón Registrarse para finalizar tu perfil!\n\n"
-                "Una vez registrado, tendrás acceso completo a:\n"
-                "👤 Perfil de freelancer y carga de CV\n"
-                "📋 Ofertas de trabajo y notificaciones de correspondencia\n"
-                "🤝 Comunicación directa con clientes\n"
-                "💼 Un panel para seguir tus postulaciones\n\n"
-                "¡Comencemos tu viaje! Haz clic abajo para configurar tu cuenta. 👇"
-            ),
-            'register': "📝 Registrarse"
-        },
-        'fr': {
-            'welcome': (
-                "👋 Bienvenue sur HustleX ! 🚀\n\n"
-                "HustleX est une plateforme premium qui met en relation des freelances de premier plan avec des opportunités incroyables. 💼✨\n\n"
-                "Pour commencer, vous devez d'abord enregistrer votre compte. Voici comment procéder :\n"
-                "1️⃣ Cliquez sur le bouton 📝 S'inscrire ci-dessous.\n"
-                "2️⃣ Remplissez vos informations de base dans la Mini App (Prénom, Nom, Genre, Date de naissance, Pays, Ville).\n"
-                "3️⃣ Acceptez les Conditions d'utilisation.\n"
-                "4️⃣ Cliquez sur le bouton S'inscrire pour finaliser votre profil !\n\n"
-                "Une fois inscrit, vous aurez un accès complet à :\n"
-                "👤 Profil freelance & Téléchargement de CV\n"
-                "📋 Offres d'emploi & Notifications de correspondance\n"
-                "🤝 Communication directe avec les clients\n"
-                "💼 Un tableau de bord pour suivre vos candidatures\n\n"
-                "Commençons votre voyage ! Cliquez ci-dessous pour créer votre compte. 👇"
-            ),
-            'register': "📝 S'inscrire"
-        },
-        'de': {
-            'welcome': (
-                "👋 Willkommen bei HustleX! 🚀\n\n"
-                "HustleX ist ein Premium-Marktplatz, der erstklassige Freelancer mit fantastischen Möglichkeiten verbindet. 💼✨\n\n"
-                "Um zu beginnen, müssen Sie zuerst Ihr Konto registrieren. So können Sie es tun:\n"
-                "1️⃣ Klicken Sie unten auf die Schaltfläche 📝 Registrieren.\n"
-                "2️⃣ Füllen Sie Ihre Basisdaten in der Mini App aus (Vorname, Nachname, Geschlecht, Geburtsdatum, Land, Stadt).\n"
-                "3️⃣ Akzeptieren Sie die Nutzungsbedingungen.\n"
-                "4️⃣ Klicken Sie auf die Schaltfläche Registrieren, um Ihr Profil fertigzustellen!\n\n"
-                "Nach der Registrierung erhalten Sie vollen Zugriff auf:\n"
-                "👤 Freelancer-Profil & Lebenslauf-Uploads\n"
-                "📋 Stellenausschreibungen & Match-Benachrichtigungen\n"
-                "🤝 Direkte Kommunikation mit Kunden\n"
-                "💼 Ein Dashboard zur Verfolgung Ihrer Bewerbungen\n\n"
-                "Lassen Sie uns Ihre Reise beginnen! Klicken Sie unten, um Ihr Konto einzurichten. 👇"
-            ),
-            'register': "📝 Registrieren"
-        },
-        'it': {
-            'welcome': (
-                "👋 Benvenuto su HustleX! 🚀\n\n"
-                "HustleX è un mercato premium che collega i migliori freelance con fantastiche opportunità. 💼✨\n\n"
-                "Per iniziare, devi prima registrare il tuo account. Ecco come puoi farlo:\n"
-                "1️⃣ Clicca sul pulsante 📝 Registrati qui sotto.\n"
-                "2️⃣ Inserisci i tuoi dati di base nella Mini App (Nome, Cognome, Genere, Data di nascita, Paese, Città).\n"
-                "3️⃣ Accetta i Termini di servizio.\n"
-                "4️⃣ Clicca sul pulsante Registrati per completare il tuo profilo!\n\n"
-                "Una volta registrato, avrai pieno accesso a:\n"
-                "👤 Profilo freelance & Caricamento CV\n"
-                "📋 Offerte di lavoro & Notifiche di corrispondenza\n"
-                "🤝 Comunicazione diretta con i clienti\n"
-                "💼 Una dashboard per tracciare le tue candidature\n\n"
-                "Iniziamo il tuo viaggio! Clicca qui sotto per configurare il tuo account. 👇"
-            ),
-            'register': "📝 Registrati"
-        },
-        'pt': {
-            'welcome': (
-                "👋 Bem-vindo ao HustleX! 🚀\n\n"
-                "HustleX é um mercado premium que conecta freelancers de alto nível com oportunidades incríveis. 💼✨\n\n"
-                "Para começar, você deve primeiro registrar sua conta. Veja como fazer isso:\n"
-                "1️⃣ Clique no botão 📝 Registrar abaixo.\n"
-                "2️⃣ Preencha seus detalhes básicos no Mini App (Nome, Sobrenome, Gênero, Data de nascimento, País, Cidade).\n"
-                "3️⃣ Aceite os Termos de Serviço.\n"
-                "4️⃣ Clique no botão Registrar para finalizar seu perfil!\n\n"
-                "Depois de registrado, você terá acesso total a:\n"
-                "👤 Perfil de freelancer e uploads de CV\n"
-                "📋 Vagas de emprego e notificações de correspondência\n"
-                "🤝 Comunicação direta com clientes\n"
-                "💼 Um painel para acompanhar suas candidaturas\n\n"
-                "Vamos começar sua jornada! Clique abaixo para configurar sua conta. 👇"
-            ),
-            'register': "📝 Registrar"
-        },
-        'am': {
-            'welcome': (
-                "👋 ወደ HustleX እንኳን ደህና መጡ! 🚀\n\n"
-                "HustleX ከፍተኛ ችሎታ ያላቸውን ፍሪላንሰሮችን ከአስደናቂ የስራ ዕድሎች ጋር የሚያገናኝ የላቀ የገበያ ቦታ ነው። 💼✨\n\n"
-                "ለመጀመር በመጀመሪያ መለያዎን መመዝገብ አለብዎት። እንዴት ማድረግ እንደሚችሉ እዚህ አለ፡-\n"
-                "1️⃣ ከታች ያለውን 📝 መዝገብ የሚለውን ቁልፍ ይጫኑ።\n"
-                "2️⃣ መሰረታዊ መረጃዎን በሚኒ አፑ ላይ ይሙሉ (የመጀመሪያ ስም፣ የአባት ስም፣ ጾታ፣ የልደት ቀን፣ አገር፣ ከተማ)።\n"
-                "3️⃣ የአገልግሎት ውሎችን ይቀበሉ።\n"
-                "4️⃣ መገለጫዎን ለማጠናቀቅ መዝገብ የሚለውን ቁልፍ ይጫኑ!\n\n"
-                "አንዴ ከተመዘገቡ በኋላ የሚከተሉትን ሙሉ መዳረሻ ያገኛሉ፡-\n"
-                "👤 የፍሪላንሰር መገለጫ እና የሲቪ ጭነቶች\n"
-                "📋 የስራ ማስታወቂያዎች እና የግጥሚያ ማሳወቂያዎች\n"
-                "🤝 ከደንበኞች ጋር ቀጥተኛ ግንኙነት\n"
-                "💼 ማመልከቻዎትን ለመከታተል ዳሽቦርድ\n\n"
-                "ጉዞዎን እንጀምር! መለያዎን ለማዘጋጀት ከታች ይጫኑ። 👇"
-            ),
-            'register': "📝 መዝገብ"
-        }
-    }
-    
-    messages = welcome_messages.get(lang_code, welcome_messages['en'])
-    
-    # Create inline keyboard with register button (WebAppInfo requires inline keyboard for mini apps)
-    register_url = f"{WEBAPP_URL.rstrip('/')}/Register"
-    keyboard = [[InlineKeyboardButton(messages['register'], web_app=WebAppInfo(url=register_url))]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    
-    if update.effective_message:
-        await update.effective_message.reply_text(
-            messages['welcome'],
-            reply_markup=reply_markup
-        )
-    else:
-        await update.effective_chat.send_message(
-            messages['welcome'],
-            reply_markup=reply_markup
-        )
+
+    await show_registration_prompt(update, context)
 
 # ---------------------------
 # Utility function for safe message editing
@@ -423,6 +422,9 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=None, con
 # Menu callback
 # ---------------------------
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_registration(update, context):
+        return
+
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     
@@ -542,59 +544,17 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle phone number contact sharing"""
     user_id = update.effective_user.id
     contact = update.message.contact
-    
-    if contact:
-        # Save phone number to database
-        collection = get_mongodb_connection()
-        if collection:
-            try:
-                collection.update_one(
-                    {"user_id": user_id},
-                    {"$set": {"phone_number": contact.phone_number}}
-                )
-                logger.info(f"Phone number saved for user {user_id}")
-            except Exception as e:
-                logger.error(f"Error saving phone number: {e}")
-        
-        # Redirect to freelancer profile setup
-        profile_setup_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
-        keyboard = [[InlineKeyboardButton("📝 Complete Profile Setup", web_app=WebAppInfo(url=profile_setup_url))]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        profile_messages = {
-            'en': "✅ Phone number saved! 📱\n\nNext step: Complete your freelancer profile setup to start applying for jobs.",
-            'es': "✅ ¡Número de teléfono guardado! 📱\n\nSiguiente paso: Completa la configuración de tu perfil de freelancer para empezar a postular a trabajos.",
-            'fr': "✅ Numéro de téléphone enregistré! 📱\n\nÉtape suivante: Complétez la configuration de votre profil de freelance pour commencer à postuler aux offres.",
-            'de': "✅ Telefonnummer gespeichert! 📱\n\nNächster Schritt: Vervollständigen Sie Ihr Freelancer-Profil, um mit der Bewerbung auf Jobs zu beginnen.",
-            'it': "✅ Numero di telefono salvato! 📱\n\nProssimo passaggio: Completa la configurazione del tuo profilo freelance per iniziare a candidarti per i lavori.",
-            'pt': "✅ Número de telefone salvo! 📱\n\nPróxima etapa: Complete a configuração do seu perfil de freelancer para começar a se candidatar a vagas.",
-            'am': "✅ ስልክ ቁጥር ተቀምጧል! 📱\n\nቀጣይ ደረጃ: ለስራ መጠየቅ የፍሪላንሰር መገለጫዎን ያጠናቅቁ።"
-        }
-        
-        lang_code = user_languages.get(user_id, 'en')
-        message = profile_messages.get(lang_code, profile_messages['en'])
-        
-        await update.message.reply_text(message, reply_markup=reply_markup)
-    else:
-        # User cancelled, still redirect to profile setup
-        profile_setup_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
-        keyboard = [[InlineKeyboardButton("📝 Complete Profile Setup", web_app=WebAppInfo(url=profile_setup_url))]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        
-        cancel_messages = {
-            'en': "❌ Phone number sharing cancelled.\n\nYou can still complete your profile setup to start applying for jobs.",
-            'es': "❌ Compartir número de teléfono cancelado.\n\nAún puedes completar la configuración de tu perfil para empezar a postular a trabajos.",
-            'fr': "❌ Partage du numéro de téléphone annulé.\n\nVous pouvez toujours compléter la configuration de votre profil pour commencer à postuler aux offres.",
-            'de': "❌ Teilen der Telefonnummer abgebrochen.\n\nSie können immer noch Ihr Profil vervollständigen, um mit der Bewerbung auf Jobs zu beginnen.",
-            'it': "❌ Condivisione del numero di telefono annullata.\n\nPuoi ancora completare la configurazione del tuo profilo per iniziare a candidarti per i lavori.",
-            'pt': "❌ Compartilhamento do número de telefone cancelado.\n\nVocê ainda pode completar a configuração do seu perfil para começar a se candidatar a vagas.",
-            'am': "❌ ስልክ ቁጥር ማጋራት ተሰርዟል።\n\nለስራ መጠየቅ መገለጫዎን ማጠናቅቅ ይችላሉ።"
-        }
-        
-        lang_code = user_languages.get(user_id, 'en')
-        message = cancel_messages.get(lang_code, cancel_messages['en'])
-        
-        await update.message.reply_text(message, reply_markup=reply_markup)
+
+    if contact and contact.user_id == user_id:
+        save_user_phone(user_id, contact.phone_number)
+        context.user_data.pop("awaiting_phone", None)
+        await update.message.reply_text(
+            "✅ Phone number saved! 📱\n\nNext: complete your freelancer profile.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await prompt_profile_setup(update, context)
+    elif contact:
+        await update.message.reply_text("Please share your own phone number using the Share button.")
 
 # ---------------------------
 # Web app data handler
@@ -607,29 +567,9 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             parsed_data = json.loads(data)
             
             if parsed_data.get('action') == 'profile_complete':
-                # User completed profile setup, redirect to job details
                 user_id = update.effective_user.id
-                job_id = parsed_data.get('job_id', '6a31521bf3edf7daab32416c')  # Default job ID
-                
-                # Redirect to job details page
-                job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
-                keyboard = [[InlineKeyboardButton("📋 View Job Details", web_app=WebAppInfo(url=job_details_url))]]
-                reply_markup = InlineKeyboardMarkup(keyboard)
-                
-                success_messages = {
-                    'en': "✅ Profile setup complete! 🎉\n\nYou can now view and apply for jobs.",
-                    'es': "✅ ¡Configuración de perfil completada! 🎉\n\nAhora puedes ver y postular a trabajos.",
-                    'fr': "✅ Configuration du profil terminée! 🎉\n\nVous pouvez maintenant voir et postuler aux offres.",
-                    'de': "✅ Profilkonfiguration abgeschlossen! 🎉\n\nSie können jetzt Jobs anzeigen und sich bewerben.",
-                    'it': "✅ Configurazione del profilo completata! 🎉\n\nOra puoi visualizzare e candidarti per i lavori.",
-                    'pt': "✅ Configuração do perfil concluída! 🎉\n\nAgora você pode visualizar e se candidatar a vagas.",
-                    'am': "✅ የመገለጫ ቅንብር ተጠናቋል! 🎉\n\nአሁን ስራዎችን ማየት እና መጠየቅ ይችላሉ።"
-                }
-                
-                lang_code = user_languages.get(user_id, 'en')
-                message = success_messages.get(lang_code, success_messages['en'])
-                
-                await update.message.reply_text(message, reply_markup=reply_markup)
+                job_id = parsed_data.get('job_id') or get_pending_job_id(context)
+                await send_job_details(update, context, job_id)
         except json.JSONDecodeError:
             logger.error("Failed to parse web app data")
         except Exception as e:
@@ -642,37 +582,74 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     text = update.effective_message.text.strip()
+
+    if text == "❌ Cancel" and (
+        context.user_data.get("awaiting_phone")
+        or (is_user_registered(user_id) and not has_user_phone(user_id))
+    ):
+        context.user_data.pop("awaiting_phone", None)
+        await update.effective_message.reply_text(
+            "Phone sharing skipped. You can complete your profile next.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await prompt_profile_setup(update, context)
+        return
     
     # Language-specific menu texts (all possible options)
     menu_texts = {
         'Menu': 'menu',
+        'Main Menu': 'menu',
         'Menú': 'menu',
-        'ሜኑ': 'menu',  # Amharic menu
+        'ሜኑ': 'menu',
         # Start menu
         'Profile': 'profile',
+        '👤 Profile': 'profile',
         'Perfil': 'profile',
+        '👤 Perfil': 'profile',
         'Profil': 'profile',
+        '👤 Profil': 'profile',
         'መገለጫ': 'profile',
+        '👤 መገለጫ': 'profile',
         'Applications': 'applications',
+        '📋 Applications': 'applications',
         'Aplicaciones': 'applications',
+        '📋 Aplicaciones': 'applications',
         'Candidatures': 'applications',
+        '📋 Candidatures': 'applications',
         'Bewerbungen': 'applications',
+        '📋 Bewerbungen': 'applications',
         'Candidature': 'applications',
+        '📋 Candidature': 'applications',
         'ማመልከቻዎች': 'applications',
+        '📋 ማመልከቻዎች': 'applications',
         'About HustleX': 'about',
+        'ℹ️ About HustleX': 'about',
         'Acerca de HustleX': 'about',
+        'ℹ️ Acerca de HustleX': 'about',
         'À propos de HustleX': 'about',
+        'ℹ️ À propos de HustleX': 'about',
         'Über HustleX': 'about',
+        'ℹ️ Über HustleX': 'about',
         'Informazioni su HustleX': 'about',
+        'ℹ️ Informazioni su HustleX': 'about',
         'Sobre o HustleX': 'about',
+        'ℹ️ Sobre o HustleX': 'about',
         'ስለ HustleX': 'about',
+        'ℹ️ ስለ HustleX': 'about',
         'Settings': 'settings',
+        '⚙️ Settings': 'settings',
         'Configuración': 'settings',
+        '⚙️ Configuración': 'settings',
         'Paramètres': 'settings',
+        '⚙️ Paramètres': 'settings',
         'Einstellungen': 'settings',
+        '⚙️ Einstellungen': 'settings',
         'Impostazioni': 'settings',
+        '⚙️ Impostazioni': 'settings',
         'Configurações': 'settings',
+        '⚙️ Configurações': 'settings',
         'ቅንብሮች': 'settings',
+        '⚙️ ቅንብሮች': 'settings',
         # Back buttons
         '⬅️ Back to Menu': 'menu',
         '⬅️ Volver al Menú': 'menu',
@@ -748,6 +725,16 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Check if the text matches any menu item
     action = menu_texts.get(text)
+
+    protected_actions = {
+        'menu', 'profile', 'applications', 'about', 'settings',
+        'settings_languages', 'settings_account', 'settings_cv', 'settings_terms',
+        'account_view_profile', 'account_notifications', 'account_delete',
+        'cv_view', 'cv_upload', 'cv_remove', 'terms_privacy',
+    }
+    if action in protected_actions and not is_user_registered(user_id):
+        await show_registration_prompt(update, context)
+        return
     
     if action == 'menu':
         await menu_callback(update, context)
@@ -760,8 +747,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif action == 'profile':
-        # Profile - open as WebApp mini app
-        profile_url = "https://hustlexet.vercel.app/freelancer-profile-setup"
+        job_id = get_pending_job_id(context)
+        profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?job_id={job_id}"
         keyboard = [[InlineKeyboardButton("👤 Open Profile", web_app=WebAppInfo(url=profile_url))]]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await update.effective_message.reply_text(
@@ -2183,35 +2170,22 @@ async def confirm_delete_account_handler(update: Update, context: ContextTypes.D
 # Profile API Integration
 # ---------------------------
 async def save_profile_to_api(user_id, profile_data):
-    """Save user profile data to the API"""
+    """Save user profile edits to MongoDB."""
     try:
-        # Prepare the data for API request
-        form_data = {
-            "name": profile_data.get('custom_name', ''),
-            "age": profile_data.get('age', 0),
-            "sex": profile_data.get('sex', 'Not specified'),
-            "contact_info": profile_data.get('contact_info', ''),
-            "init_data": f"user_id={user_id}"  # Simple init_data for demo purposes
-        }
-        
-        # If we have a profile picture, we would need to download it and send as a file
-        profile_pic_file_id = profile_data.get('profile_pic_file_id')
-        
-        # In a real implementation, you would:
-        # 1. Download the file using context.bot.get_file(file_id)
-        # 2. Send the file as part of a multipart/form-data request
-        # 3. Handle the API response
-        
-        # For now, we'll just log that we would send this data
-        logger.info(f"Would send profile data to API for user {user_id}: {form_data}")
-        
-        # In production, you would make an actual API call here
-        # Example with aiohttp:
-        # async with aiohttp.ClientSession() as session:
-        #     async with session.post('http://api-url/api/profile', data=form_data) as response:
-        #         return await response.json()
-        
-        return True
+        fields = {}
+        if profile_data.get("custom_name"):
+            fields["name"] = profile_data["custom_name"]
+        if profile_data.get("age"):
+            fields["age"] = profile_data["age"]
+        if profile_data.get("sex"):
+            fields["sex"] = profile_data["sex"]
+        if profile_data.get("contact_info"):
+            fields["contact_info"] = profile_data["contact_info"]
+        if profile_data.get("profile_pic_file_id"):
+            fields["profile_pic_file_id"] = profile_data["profile_pic_file_id"]
+        if not fields:
+            return True
+        return save_profile_fields(user_id, fields)
     except Exception as e:
         logger.error(f"Error saving profile to API: {e}")
         return False
@@ -2419,24 +2393,10 @@ async def job_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["job_link"] = update.message.text
     job_data = context.user_data
 
-    # Validate URL
-    def safe_url(url: str) -> str:
-        if not url:
-            return "https://example.com"
-        url = url.strip()
-        if not (url.startswith("http://") or url.startswith("https://")):
-            url = "https://" + url
-        try:
-            parsed = urlparse(url)
-            if not parsed.scheme or not parsed.netloc:
-                return "https://example.com"
-            return parsed.geturl()
-        except Exception as e:
-            logger.error(f"Invalid URL {url}: {e}")
-            return "https://example.com"
-
-    view_details_url = safe_url(job_data.get("job_link"))
-    keyboard = [[InlineKeyboardButton("View Details", url=view_details_url)]]
+    job_id = save_job_to_db(job_data)
+    apply_url = f"https://t.me/{BOT_USERNAME}?start=job_{job_id}"
+    job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
+    keyboard = [[InlineKeyboardButton("Apply Job", url=apply_url)]]
 
     # Check channel ID and bot permissions
     CHANNEL_ID = "-1003194542999"  # TODO: Replace with the correct channel ID
@@ -2543,7 +2503,6 @@ def main():
     async def post_init(application):
         await application.bot.set_my_commands([
             BotCommand("start", "Main Menu"),
-            BotCommand("register_complete", "Complete Registration")
         ])
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()

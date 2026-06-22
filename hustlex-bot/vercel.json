@@ -19,6 +19,10 @@
       "destination": "/freelancer-profile-setup.html"
     },
     {
+      "source": "/job-details/:job_id",
+      "destination": "/job-details.html"
+    },
+    {
       "source": "/post-job",
       "destination": "/post-job.html"
     }

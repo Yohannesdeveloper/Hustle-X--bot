@@ -142,6 +142,8 @@
       const cvFile = document.getElementById('cv_file').files[0];
       
       const initData = window.Telegram?.WebApp?.initData || '';
+      const params = new URLSearchParams(window.location.search);
+      const jobId = params.get('job_id') || '6a31521bf3edf7daab32416c';
       
       const formData = new FormData();
       formData.append('name', name);
@@ -149,7 +151,7 @@
       formData.append('sex', sex);
       formData.append('initData', initData);
       if (cvFile) {
-        formData.append('cv', cvFile);
+        formData.append('cv_file', cvFile);
       }
       
       try {
@@ -158,20 +160,25 @@
           body: formData
         });
         
+        const data = await response.json().catch(() => ({}));
+
         if (response.ok) {
-          // Store initData for authentication on next pages
           if (initData) {
             localStorage.setItem('telegram_init_data', initData);
           }
-          
-          // Redirect to job-listings or close the web app
+
           if (window.Telegram && window.Telegram.WebApp) {
-            window.Telegram.WebApp.close();
+            window.Telegram.WebApp.sendData(JSON.stringify({
+              action: 'profile_complete',
+              job_id: jobId
+            }));
+            window.location.href = `/job-details/${jobId}`;
           } else {
-            window.location.href = 'https://hustlexet.vercel.app/job-listings';
+            window.location.href = `/job-details/${jobId}`;
           }
         } else {
-          alert('Save failed. Please try again.');
+          const detail = data.detail || 'Save failed. Please try again.';
+          alert(typeof detail === 'string' ? detail : JSON.stringify(detail));
           submitBtn.disabled = false;
           submitBtn.textContent = 'Save Profile';
         }

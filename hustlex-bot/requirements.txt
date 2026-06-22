@@ -1,0 +1,6 @@
+fastapi
+httpx
+pymongo
+aiofiles
+mangum
+pydantic

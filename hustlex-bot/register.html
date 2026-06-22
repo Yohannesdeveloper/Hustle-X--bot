@@ -412,21 +412,24 @@
         const data = await response.json();
 
         if (response.ok) {
-          // Show success state briefly before closing
           submitBtn.textContent = 'Registered \u2705';
           submitBtn.style.background = 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)';
           errorMsg.style.display = 'none';
         
           if (tg) {
-            // Wait a moment so user sees the success tick, then close
             setTimeout(() => { tg.close(); }, 1200);
           } else {
-            alert('Registration completed successfully! Check the bot for confirmation.');
+            alert('Registration completed successfully! Check the bot for next steps.');
             form.reset();
-            submitBtn.textContent = 'Registered \u2705';
           }
         } else {
-          throw new Error(data.detail || 'Failed to complete registration');
+          const detail = data.detail;
+          const message = typeof detail === 'string'
+            ? detail
+            : Array.isArray(detail)
+              ? detail.map((d) => d.msg || d).join(', ')
+              : 'Failed to complete registration';
+          throw new Error(message);
         }
       } catch (err) {
         errorMsg.textContent = `❌ ${err.message}`;
