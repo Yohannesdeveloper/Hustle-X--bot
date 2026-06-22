@@ -417,10 +417,15 @@
           submitBtn.style.background = 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)';
           errorMsg.style.display = 'none';
         
-          setTimeout(() => {
-            // Redirect to freelancer profile setup page
-            window.location.href = '/freelancer-profile-setup';
-          }, 1200);
+          if (tg) {
+            // Wait a moment so user sees the success tick, then redirect to freelancer profile setup
+            setTimeout(() => {
+              window.location.href = './freelancer-profile-setup.html';
+            }, 1200);
+          } else {
+            alert('Registration completed successfully! Check the bot for confirmation.');
+            window.location.href = './freelancer-profile-setup.html';
+          }
         } else {
           throw new Error(data.detail || 'Failed to complete registration');
         }

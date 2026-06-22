@@ -278,6 +278,9 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
         # Clear registration state
         del registration_state[user_id]
         
+        # Set flag that we are waiting for user to complete profile then share phone
+        context.user_data['awaiting_phone'] = True
+        
         # Show success message
         profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
         keyboard = [
@@ -294,13 +297,49 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
                  "• 📋 Track your applications\n"
                  "• 👤 Build your freelancer profile\n"
                  "• ⚙️ Customize your preferences\n\n"
-                 "💡 *Tip:* Complete your profile on our website to increase your chances of getting hired!",
+                 "💡 *Tip:* Complete your profile on our website to increase your chances of getting hired!\n"
+                 "After completing your profile, you will be asked to share your phone number.",
             parse_mode="Markdown",
             reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
         )
         return True
     
     return False
+
+
+async def prompt_phone_share(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Prompt user to share their phone number with request_contact=True"""
+    keyboard = [
+        [KeyboardButton("📱 Share Phone Number", request_contact=True)]
+    ]
+    await context.bot.send_message(
+        chat_id=update.effective_chat.id,
+        text="📞 *Share Your Phone Number*\n\n"
+             "━━━━━━━━━━━━━━━━━━━━━━\n"
+             "Please share your phone number to continue:\n"
+             "This helps us verify your account.",
+        parse_mode="Markdown",
+        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    )
+
+
+async def contact_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle incoming contact message and save it, then show main menu"""
+    user_id = update.effective_user.id
+    contact = update.effective_message.contact
+
+    # Save contact
+    if user_id not in user_profiles:
+        user_profiles[user_id] = {}
+    user_profiles[user_id]['phone_number'] = contact.phone_number
+
+    # Clear awaiting phone flag
+    if 'awaiting_phone' in context.user_data:
+        del context.user_data['awaiting_phone']
+
+    # Show main menu with profile, about, settings, applications
+    await show_menu(update, context)
+
 
 # ---------------------------
 # Registration check (gate for menu access)
@@ -2330,6 +2369,11 @@ async def general_text_handler(update: Update, context: ContextTypes.DEFAULT_TYP
         if handled:
             return
     
+    # Check if we are waiting for phone number share
+    if context.user_data.get('awaiting_phone'):
+        await prompt_phone_share(update, context)
+        return
+    
     awaiting = context.user_data.get('awaiting_input')
     in_wizard = 'profile_wizard_step' in context.user_data
     
@@ -2417,6 +2461,9 @@ def main():
     # Notification toggles
     app.add_handler(CallbackQueryHandler(toggle_notification_handler, pattern="^toggle_"))
     app.add_handler(CallbackQueryHandler(confirm_delete_account_handler, pattern="^confirm_delete_account$"))
+
+    # Contact handler
+    app.add_handler(MessageHandler(filters.CONTACT, contact_handler))
 
     # Reply keyboard text message handlers
     # Registration button handler (must be early to catch unregistered users)

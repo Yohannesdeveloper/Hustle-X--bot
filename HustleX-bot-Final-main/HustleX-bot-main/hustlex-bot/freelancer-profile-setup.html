@@ -487,10 +487,10 @@
         const data = await response.json();
         if (response.ok) {
           if (tg) {
-            tg.showAlert('Profile published successfully!');
-            setTimeout(() => tg.close(), 2000);
+            tg.showAlert('Profile published successfully! Now share your phone number.');
+            setTimeout(() => tg.close(), 1500);
           } else {
-            alert('Profile published successfully!');
+            alert('Profile published successfully! Now share your phone number.');
           }
         } else {
           throw new Error(data.detail || 'Failed to save profile');
