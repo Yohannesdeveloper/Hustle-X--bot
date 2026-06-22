@@ -545,9 +545,8 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         save_user_phone(user_id, contact.phone_number)
         context.user_data.pop("awaiting_phone", None)
         await update.message.reply_text(
-            "✅ Phone number saved! 📱\n\nNext: complete your freelancer profile.",
+            "✅ Phone number saved! 📱",
         )
-        await prompt_profile_setup(update, context)
         await menu_callback(update, context)
     elif contact:
         await update.message.reply_text("Please share your own phone number using the Share button.")
