@@ -328,19 +328,12 @@ async def send_job_details(update: Update, context: ContextTypes.DEFAULT_TYPE, j
         await update.effective_chat.send_message(message)
 
 async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route a registered user through phone → profile → job details."""
+    """Route a registered user through profile → job details."""
     user_id = update.effective_user.id
     registered_users.add(user_id)
     job_id = parse_job_id_from_start(context.args) or context.user_data.get("pending_job_id")
     if job_id:
         context.user_data["pending_job_id"] = job_id
-
-    if job_id and has_user_phone(user_id):
-        await send_job_details(update, context, job_id)
-        return
-
-    if context.user_data.get("awaiting_phone"):
-        return
 
     if not is_profile_setup_complete(user_id):
         await prompt_profile_setup(update, context)
@@ -2514,9 +2507,6 @@ def main():
     # Command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("register_complete", register_complete))
-    
-    # Contact handler for phone number sharing
-    app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
     # Job Posting ConversationHandler
     job_post_conv = ConversationHandler(
