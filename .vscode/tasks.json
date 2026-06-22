@@ -1,0 +1,14 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"type": "npm",
+			"script": "build",
+			"path": "hustlex-bot",
+			"group": "build",
+			"problemMatcher": [],
+			"label": "npm: build - hustlex-bot",
+			"detail": "echo 'No build step needed'"
+		}
+	]
+}
