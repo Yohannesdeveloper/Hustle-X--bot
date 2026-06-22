@@ -345,7 +345,7 @@ async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TY
         return
 
     if not is_profile_setup_complete(user_id):
-        await prompt_profile_setup(update, context)
+        await menu_callback(update, context)
         return
 
     if job_id:
@@ -584,10 +584,10 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ):
         context.user_data.pop("awaiting_phone", None)
         await update.effective_message.reply_text(
-            "Phone sharing skipped. You can complete your profile next.",
+            "Phone sharing skipped.",
             reply_markup=ReplyKeyboardRemove(),
         )
-        await prompt_profile_setup(update, context)
+        await menu_callback(update, context)
         return
     
     # Language-specific menu texts (all possible options)
