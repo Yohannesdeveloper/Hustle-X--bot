@@ -301,15 +301,17 @@ async def prompt_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYP
     lang_code = user_languages.get(user_id, 'en')
     job_id = get_pending_job_id(context)
     profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?job_id={job_id}"
+    keyboard = [[InlineKeyboardButton("📝 Complete Profile Setup", web_app=WebAppInfo(url=profile_url))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
     messages = {
-        'en': f"📝 Next step: complete your freelancer profile to start applying for jobs.\n\nClick here: {profile_url}",
+        'en': "📝 Next step: complete your freelancer profile to start applying for jobs.",
     }
     message = messages.get(lang_code, messages['en'])
     chat = update.effective_chat
     if update.effective_message:
-        await update.effective_message.reply_text(message)
+        await update.effective_message.reply_text(message, reply_markup=reply_markup)
     else:
-        await chat.send_message(message)
+        await chat.send_message(message, reply_markup=reply_markup)
 
 async def send_job_details(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str = None):
     job_id = job_id or get_pending_job_id(context)
@@ -373,7 +375,7 @@ async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     registered_users.add(user_id)
-    await prompt_phone_share(update, context)
+    await prompt_profile_setup(update, context)
 
 # ---------------------------
 # /start command
