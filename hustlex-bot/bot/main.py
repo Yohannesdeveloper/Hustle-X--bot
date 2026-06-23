@@ -328,21 +328,24 @@ async def send_job_details(update: Update, context: ContextTypes.DEFAULT_TYPE, j
         await update.effective_chat.send_message(message)
 
 async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route a registered user through profile → job details."""
+    """Route a registered user based on phone number existence."""
     user_id = update.effective_user.id
     registered_users.add(user_id)
     job_id = parse_job_id_from_start(context.args) or context.user_data.get("pending_job_id")
     if job_id:
         context.user_data["pending_job_id"] = job_id
 
-    if not is_profile_setup_complete(user_id):
-        await prompt_profile_setup(update, context)
+    # Check if user has phone number
+    if has_user_phone(user_id):
+        # Existing user with phone number - go directly to job details
+        if job_id:
+            await send_job_details(update, context, job_id)
+        else:
+            await menu_callback(update, context)
         return
 
-    if job_id:
-        await send_job_details(update, context, job_id)
-    else:
-        await menu_callback(update, context)
+    # No phone number - show phone sharing popup
+    await prompt_phone_share(update, context)
 
 # ---------------------------
 # /register_complete command
@@ -350,11 +353,11 @@ async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TY
 async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mark user as registered after completing registration on the website"""
     user_id = update.effective_user.id
-    
+
     username = update.effective_user.username
     first_name = update.effective_user.first_name
     success = register_user(user_id, username, first_name)
-    
+
     if not success:
         error_message = "❌ Failed to register. Please try again later."
         if update.effective_message:
@@ -362,9 +365,9 @@ async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         else:
             await update.effective_chat.send_message(error_message)
         return
-    
+
     registered_users.add(user_id)
-    await prompt_profile_setup(update, context)
+    await prompt_phone_share(update, context)
 
 # ---------------------------
 # /start command
@@ -537,8 +540,9 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data.pop("awaiting_phone", None)
         await update.message.reply_text(
             "✅ Phone number saved! 📱",
+            reply_markup=ReplyKeyboardRemove(),
         )
-        await menu_callback(update, context)
+        await prompt_profile_setup(update, context)
     elif contact:
         await update.message.reply_text("Please share your own phone number using the Share button.")
 
@@ -578,7 +582,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Phone sharing skipped.",
             reply_markup=ReplyKeyboardRemove(),
         )
-        await menu_callback(update, context)
+        await prompt_profile_setup(update, context)
         return
     
     # Language-specific menu texts (all possible options)
@@ -2507,6 +2511,9 @@ def main():
     # Command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("register_complete", register_complete))
+
+    # Contact handler for phone number sharing
+    app.add_handler(MessageHandler(filters.CONTACT, handle_contact))
 
     # Job Posting ConversationHandler
     job_post_conv = ConversationHandler(
