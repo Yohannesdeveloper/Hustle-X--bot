@@ -249,14 +249,18 @@ async def show_registration_prompt(update: Update, context: ContextTypes.DEFAULT
     welcome_messages = {
         'en': {
             'welcome': (
-                "👋 Welcome to HustleX! 🚀\n\n"
-                "To access the main menu, please register first.\n\n"
-                "1️⃣ Click 📝 Register below\n"
-                "2️⃣ Fill in your details\n"
-                "3️⃣ Accept the Terms of Service\n"
-                "4️⃣ Submit to complete registration"
+                "👋 *Welcome to HustleX!* 🚀\n\n"
+                "You stand at the gates of the **premier freelance kingdom** — where top 1% talent "
+                "meets world-class opportunities. But first, you need your **welcome papers**.\n\n"
+                "Registration takes **60 seconds** and unlocks:\n"
+                "• 🎯 *Your Profile Throne* — Let clients discover your genius\n"
+                "• 📋 *Application Command Center* — Track every conquest\n"
+                "• ⚡ *Instant Apply* — One tap to your next big gig\n"
+                "• 🌟 *Verified Status* — Flex on the competition\n\n"
+                "This isn't just a sign-up — it's your **origin story**. 🦸\n\n"
+                "👇 Tap below to begin your legend 👇"
             ),
-            'register': "📝 Register",
+            'register': "📝 Register Now — Join the Elite",
         },
     }
     messages = welcome_messages.get(lang_code, welcome_messages['en'])
