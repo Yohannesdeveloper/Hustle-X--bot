@@ -179,6 +179,25 @@ def save_job_to_db(job_data: dict) -> str:
     database.jobs.insert_one(doc)
     return job_id
 
+def delete_user(user_id: int) -> bool:
+    """Delete all user data from MongoDB and in-memory storage."""
+    database = get_db()
+    success = True
+    try:
+        if database is not None:
+            database.registered_users.delete_one({"user_id": user_id})
+            database.profiles.delete_one({"user_id": user_id})
+        registered_users.discard(user_id)
+        user_cvs.pop(user_id, None)
+        user_languages.pop(user_id, None)
+        user_profiles.pop(user_id, None)
+        user_posts.pop(user_id, None)
+        logger.info(f"User {user_id} deleted successfully")
+    except Exception as e:
+        logger.error(f"Error deleting user {user_id}: {e}")
+        success = False
+    return success
+
 # Simple in-memory storage for CV data and user preferences (replace with database in production)
 user_cvs = {}
 user_languages = {}
@@ -926,9 +945,47 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
     elif action == 'account_notifications':
-        await update.effective_message.reply_text("🔔 *Notifications Settings*\n\nThis feature is coming soon!", parse_mode="Markdown")
+        user_id = update.effective_user.id
+        if not hasattr(account_notifications_handler, 'user_notifications'):
+            account_notifications_handler.user_notifications = {}
+        user_prefs = account_notifications_handler.user_notifications.get(user_id, {
+            'job_alerts': True,
+            'application_updates': True,
+            'messages': True,
+            'marketing': False
+        })
+        keyboard = [
+            [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if user_prefs['job_alerts'] else '❌ OFF'}", callback_data="toggle_job_alerts")],
+            [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if user_prefs['application_updates'] else '❌ OFF'}", callback_data="toggle_app_updates")],
+            [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if user_prefs['messages'] else '❌ OFF'}", callback_data="toggle_messages")],
+            [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if user_prefs['marketing'] else '❌ OFF'}", callback_data="toggle_marketing")],
+        ]
+        await update.effective_message.reply_text(
+            "🔔 Notification Settings\n\n"
+            "Manage your notification preferences:\n\n"
+            "🚨 Job Alerts: Get notified about new jobs\n"
+            "📄 Application Updates: Status changes on your applications\n"
+            "💬 Messages: Direct messages from employers\n"
+            "📢 Marketing: Updates about HustleX features\n\n"
+            "Tip: Toggle each below.",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     elif action == 'account_delete':
-        await update.effective_message.reply_text("🗑️ *Delete Account*\n\nThis action is not reversible! This feature is coming soon.", parse_mode="Markdown")
+        keyboard = [
+            [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
+        ]
+        await update.effective_message.reply_text(
+            "🗑️ Delete Account\n\n"
+            "⚠️ WARNING: This action is permanent and cannot be undone!\n\n"
+            "What will be deleted:\n"
+            "- Your profile information\n"
+            "- Uploaded CV and documents\n"
+            "- Job application history\n"
+            "- All saved preferences\n\n"
+            "Are you sure you want to permanently delete your account?",
+            reply_markup=InlineKeyboardMarkup(keyboard)
+        )
     elif action == 'cv_view':
         user_id = update.effective_user.id
         if user_id in user_cvs and user_cvs[user_id]:
@@ -2081,15 +2138,14 @@ async def account_notifications_handler(update: Update, context: ContextTypes.DE
     
     await safe_edit_message(
         q,
-        f"🔔 *Notification Settings*\n\n"
-        f"📱 *Manage your notification preferences:*\n\n"
-        f"🚨 *Job Alerts:* Get notified about new jobs\n"
-        f"📄 *Application Updates:* Status changes on your applications\n"
-        f"💬 *Messages:* Direct messages from employers\n"
-        f"📢 *Marketing:* Updates about HustleX features\n\n"
-        f"💡 *Tip:* You can toggle each notification type on/off below.",
+        "🔔 Notification Settings\n\n"
+        "Manage your notification preferences:\n\n"
+        "🚨 Job Alerts: Get notified about new jobs\n"
+        "📄 Application Updates: Status changes on your applications\n"
+        "💬 Messages: Direct messages from employers\n"
+        "📢 Marketing: Updates about HustleX features\n\n"
+        "Tip: You can toggle each notification type on/off below.",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
         context=context
     )
 
@@ -2104,17 +2160,15 @@ async def account_delete_handler(update: Update, context: ContextTypes.DEFAULT_T
     
     await safe_edit_message(
         q,
-        f"🗑️ *Delete Account*\n\n"
-        f"⚠️ *WARNING:* This action is permanent and cannot be undone!\n\n"
-        f"🔥 *What will be deleted:*\n"
-        f"• Your profile information\n"
-        f"• Uploaded CV and documents\n"
-        f"• Job application history\n"
-        f"• All saved preferences\n\n"
-        f"📞 *Alternative:* You can temporarily disable notifications instead.\n\n"
-        f"❓ *Are you sure you want to permanently delete your account?*",
+        "🗑️ Delete Account\n\n"
+        "WARNING: This action is permanent and cannot be undone!\n\n"
+        "What will be deleted:\n"
+        "- Your profile information\n"
+        "- Uploaded CV and documents\n"
+        "- Job application history\n"
+        "- All saved preferences\n\n"
+        "Are you sure you want to permanently delete your account?",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
         context=context
     )
 
@@ -2127,35 +2181,34 @@ async def privacy_policy_handler(update: Update, context: ContextTypes.DEFAULT_T
     ]
     
     privacy_text = (
-        "🔒 *Privacy Policy*\n\n"
-        "📄 *Last Updated:* October 2024\n\n"
+        "🔒 Privacy Policy\n\n"
+        "Last Updated: October 2024\n\n"
         "Your privacy is important to us. Here's how we protect your data:\n\n"
-        "📊 *Data We Collect:*\n"
-        "• Basic profile information (name, username)\n"
-        "• CVs and documents you upload\n"
-        "• Job application history\n"
-        "• Usage analytics (anonymous)\n\n"
-        "🛡️ *How We Protect Your Data:*\n"
-        "• Encrypted storage of all personal information\n"
-        "• Secure file handling for CVs and documents\n"
-        "• No sharing of personal data with third parties\n"
-        "• Regular security audits and updates\n\n"
-        "🎯 *How We Use Your Data:*\n"
-        "• Matching you with relevant job opportunities\n"
-        "• Improving our service quality\n"
-        "• Sending important notifications (if enabled)\n\n"
-        "🗑️ *Your Rights:*\n"
-        "• Request data deletion at any time\n"
-        "• Access your stored information\n"
-        "• Opt-out of data processing\n\n"
-        "📞 *Contact:* @HustleXSupport for privacy questions"
+        "Data We Collect:\n"
+        "- Basic profile information (name, username)\n"
+        "- CVs and documents you upload\n"
+        "- Job application history\n"
+        "- Usage analytics (anonymous)\n\n"
+        "How We Protect Your Data:\n"
+        "- Encrypted storage of all personal information\n"
+        "- Secure file handling for CVs and documents\n"
+        "- No sharing of personal data with third parties\n"
+        "- Regular security audits and updates\n\n"
+        "How We Use Your Data:\n"
+        "- Matching you with relevant job opportunities\n"
+        "- Improving our service quality\n"
+        "- Sending important notifications (if enabled)\n\n"
+        "Your Rights:\n"
+        "- Request data deletion at any time\n"
+        "- Access your stored information\n"
+        "- Opt-out of data processing\n\n"
+        "Contact: @HustleXSupport for privacy questions"
     )
     
     await safe_edit_message(
         q,
         privacy_text,
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
         context=context
     )
 
@@ -2205,13 +2258,10 @@ async def confirm_delete_account_handler(update: Update, context: ContextTypes.D
     
     user_id = update.effective_user.id
     
-    # Remove user data
-    if user_id in user_cvs:
-        del user_cvs[user_id]
+    delete_user(user_id)
     
     if hasattr(account_notifications_handler, 'user_notifications'):
-        if user_id in account_notifications_handler.user_notifications:
-            del account_notifications_handler.user_notifications[user_id]
+        account_notifications_handler.user_notifications.pop(user_id, None)
     
     keyboard = [
         [InlineKeyboardButton("🏠 Start Over", callback_data="menu")]
@@ -2219,17 +2269,16 @@ async def confirm_delete_account_handler(update: Update, context: ContextTypes.D
     
     await safe_edit_message(
         q,
-        f"✅ *Account Deleted Successfully*\n\n"
-        f"🗑️ Your account has been permanently deleted from HustleX.\n\n"
-        f"📋 *What was removed:*\n"
-        f"• Profile information\n"
-        f"• Uploaded CV and documents\n"
-        f"• Notification preferences\n"
-        f"• All saved data\n\n"
-        f"👋 Thank you for using HustleX. You can create a new account anytime by using /start.\n\n"
-        f"💬 If you have feedback, contact @HustleXSupport",
+        "✅ Account Deleted Successfully\n\n"
+        "Your account has been permanently deleted from HustleX.\n\n"
+        "What was removed:\n"
+        "- Profile information\n"
+        "- Uploaded CV and documents\n"
+        "- Notification preferences\n"
+        "- All saved data\n\n"
+        "Thank you for using HustleX. You can create a new account anytime by using /start.\n\n"
+        "If you have feedback, contact @HustleXSupport",
         reply_markup=InlineKeyboardMarkup(keyboard),
-        parse_mode="Markdown",
         context=context
     )
 
