@@ -925,12 +925,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             )
         except Exception as e:
             await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
-        keyboard = [[KeyboardButton("⬅️ Back to Settings")]]
-        await update.effective_message.reply_text(
-            text,
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode="Markdown"
-        )
     elif action == 'account_notifications':
         await update.effective_message.reply_text("🔔 *Notifications Settings*\n\nThis feature is coming soon!", parse_mode="Markdown")
     elif action == 'account_delete':
