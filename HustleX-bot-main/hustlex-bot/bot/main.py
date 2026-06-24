@@ -7,7 +7,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand, MenuButtonCommands
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telegram.error import TelegramError
 from urllib.parse import urlparse
@@ -2338,6 +2338,7 @@ def main():
         await application.bot.set_my_commands([
             BotCommand("start", "Main Menu"),
         ])
+        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     
