@@ -764,6 +764,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '🔔 Notifications': 'account_notifications',
         '🗑️ Delete Account': 'account_delete',
         '⬅️ Back to Account': 'settings_account',
+        '❌ Cancel': 'settings_account',
         # CV settings buttons
         '👁️ View Current CV': 'cv_view',
         '📤 Upload New CV': 'cv_upload',
@@ -783,9 +784,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
     
     # Handle notification toggle buttons (dynamic text based on current state)
-    if text in ("⚠️ YES, DELETE MY ACCOUNT",):
-        action = 'confirm_delete_account'
-    elif text.startswith("🚨 Job Alerts:"):
+    if text.startswith("🚨 Job Alerts:"):
         if user_id not in _shared_notif_prefs:
             _shared_notif_prefs[user_id] = {'job_alerts': True, 'application_updates': True, 'messages': True, 'marketing': False}
         _shared_notif_prefs[user_id]['job_alerts'] = not _shared_notif_prefs[user_id]['job_alerts']
@@ -809,6 +808,29 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _shared_notif_prefs[user_id]['marketing'] = not _shared_notif_prefs[user_id]['marketing']
         await send_notification_settings(update, context)
         return
+    elif text in ("⚠️ YES, DELETE MY ACCOUNT",):
+        user_id = update.effective_user.id
+        delete_user(user_id)
+        _shared_notif_prefs.pop(user_id, None)
+        await update.effective_message.reply_text(
+            "✅ Account Deleted Successfully\n\n"
+            "Your account has been permanently deleted from HustleX.\n\n"
+            "What was removed:\n"
+            "- Profile information\n"
+            "- Uploaded CV and documents\n"
+            "- Notification preferences\n"
+            "- All saved data\n\n"
+            "Thank you for using HustleX. You can create a new account anytime by using /start.\n\n"
+            "If you have feedback, contact @HustleXSupport",
+            reply_markup=ReplyKeyboardRemove()
+        )
+        await show_menu(update, context)
+        return
+    elif text in ("❌ Cancel",) and not (
+        context.user_data.get("awaiting_phone")
+        or (is_user_registered(user_id) and not has_user_phone(user_id))
+    ):
+        pass  # Will fall through to menu_texts or ignore
 
     # Check if the text matches any menu item
     action = menu_texts.get(text)
@@ -992,24 +1014,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await send_notification_settings(update, context)
     elif action == 'account_delete':
         await send_delete_confirmation(update, context)
-    elif action == 'confirm_delete_account':
-        user_id = update.effective_user.id
-        delete_user(user_id)
-        _shared_notif_prefs.pop(user_id, None)
-        await update.effective_message.reply_text(
-            "✅ Account Deleted Successfully\n\n"
-            "Your account has been permanently deleted from HustleX.\n\n"
-            "What was removed:\n"
-            "- Profile information\n"
-            "- Uploaded CV and documents\n"
-            "- Notification preferences\n"
-            "- All saved data\n\n"
-            "Thank you for using HustleX. You can create a new account anytime by using /start.\n\n"
-            "If you have feedback, contact @HustleXSupport",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        await show_menu(update, context)
-        return
     elif action == 'cv_view':
         user_id = update.effective_user.id
         cv_data = get_user_cv(user_id)
