@@ -875,7 +875,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif action == 'applications':
-        applications_url = "https://hustlexet.vercel.app/my-applications"
+        user_id = update.effective_user.id
+        applications_url = f"https://hustlexet.vercel.app/my-applications?user_id={user_id}"
         keyboard = [[InlineKeyboardButton("📋 Open Applications", web_app=WebAppInfo(url=applications_url))]]
         await update.effective_message.reply_text(
             "📋 *Your Applications Command Center*\n\n"
@@ -1060,8 +1061,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # Other tab callbacks
 # ---------------------------
 async def applications_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    # Show applications URL as clickable link
-    applications_url = "https://hustlexet.vercel.app/my-applications"
+    user_id = update.effective_user.id
+    applications_url = f"https://hustlexet.vercel.app/my-applications?user_id={user_id}"
     if update.callback_query:
         q = update.callback_query
         await q.answer()
