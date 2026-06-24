@@ -945,47 +945,53 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
     elif action == 'account_notifications':
-        user_id = update.effective_user.id
-        if not hasattr(account_notifications_handler, 'user_notifications'):
-            account_notifications_handler.user_notifications = {}
-        user_prefs = account_notifications_handler.user_notifications.get(user_id, {
-            'job_alerts': True,
-            'application_updates': True,
-            'messages': True,
-            'marketing': False
-        })
-        keyboard = [
-            [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if user_prefs['job_alerts'] else '❌ OFF'}", callback_data="toggle_job_alerts")],
-            [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if user_prefs['application_updates'] else '❌ OFF'}", callback_data="toggle_app_updates")],
-            [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if user_prefs['messages'] else '❌ OFF'}", callback_data="toggle_messages")],
-            [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if user_prefs['marketing'] else '❌ OFF'}", callback_data="toggle_marketing")],
-        ]
-        await update.effective_message.reply_text(
-            "🔔 Notification Settings\n\n"
-            "Manage your notification preferences:\n\n"
-            "🚨 Job Alerts: Get notified about new jobs\n"
-            "📄 Application Updates: Status changes on your applications\n"
-            "💬 Messages: Direct messages from employers\n"
-            "📢 Marketing: Updates about HustleX features\n\n"
-            "Tip: Toggle each below.",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        try:
+            user_id = update.effective_user.id
+            if not hasattr(account_notifications_handler, 'user_notifications'):
+                account_notifications_handler.user_notifications = {}
+            user_prefs = account_notifications_handler.user_notifications.get(user_id, {
+                'job_alerts': True,
+                'application_updates': True,
+                'messages': True,
+                'marketing': False
+            })
+            keyboard = [
+                [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if user_prefs['job_alerts'] else '❌ OFF'}", callback_data="toggle_job_alerts")],
+                [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if user_prefs['application_updates'] else '❌ OFF'}", callback_data="toggle_app_updates")],
+                [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if user_prefs['messages'] else '❌ OFF'}", callback_data="toggle_messages")],
+                [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if user_prefs['marketing'] else '❌ OFF'}", callback_data="toggle_marketing")],
+            ]
+            await update.effective_message.reply_text(
+                "🔔 Notification Settings\n\n"
+                "Manage your notification preferences:\n\n"
+                "🚨 Job Alerts: Get notified about new jobs\n"
+                "📄 Application Updates: Status changes on your applications\n"
+                "💬 Messages: Direct messages from employers\n"
+                "📢 Marketing: Updates about HustleX features\n\n"
+                "Tip: Toggle each below.",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception as e:
+            await update.effective_message.reply_text(f"Notif error: {type(e).__name__}: {e}")
     elif action == 'account_delete':
-        keyboard = [
-            [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
-        ]
-        await update.effective_message.reply_text(
-            "🗑️ Delete Account\n\n"
-            "⚠️ WARNING: This action is permanent and cannot be undone!\n\n"
-            "What will be deleted:\n"
-            "- Your profile information\n"
-            "- Uploaded CV and documents\n"
-            "- Job application history\n"
-            "- All saved preferences\n\n"
-            "Are you sure you want to permanently delete your account?",
-            reply_markup=InlineKeyboardMarkup(keyboard)
-        )
+        try:
+            keyboard = [
+                [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
+                [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
+            ]
+            await update.effective_message.reply_text(
+                "🗑️ Delete Account\n\n"
+                "WARNING: This action is permanent and cannot be undone!\n\n"
+                "What will be deleted:\n"
+                "- Your profile information\n"
+                "- Uploaded CV and documents\n"
+                "- Job application history\n"
+                "- All saved preferences\n\n"
+                "Are you sure you want to permanently delete your account?",
+                reply_markup=InlineKeyboardMarkup(keyboard)
+            )
+        except Exception as e:
+            await update.effective_message.reply_text(f"Delete error: {type(e).__name__}: {e}")
     elif action == 'cv_view':
         user_id = update.effective_user.id
         if user_id in user_cvs and user_cvs[user_id]:
@@ -2109,68 +2115,75 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 
 
 async def account_notifications_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
-    user_id = update.effective_user.id
-    # Simple notification preferences storage (in production, use database)
-    if not hasattr(account_notifications_handler, 'user_notifications'):
-        account_notifications_handler.user_notifications = {}
-    
-    user_prefs = account_notifications_handler.user_notifications.get(user_id, {
-        'job_alerts': True,
-        'application_updates': True,
-        'messages': True,
-        'marketing': False
-    })
-    
-    keyboard = [
-        [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if user_prefs['job_alerts'] else '❌ OFF'}", 
-                             callback_data="toggle_job_alerts")],
-        [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if user_prefs['application_updates'] else '❌ OFF'}", 
-                             callback_data="toggle_app_updates")],
-        [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if user_prefs['messages'] else '❌ OFF'}", 
-                             callback_data="toggle_messages")],
-        [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if user_prefs['marketing'] else '❌ OFF'}", 
-                             callback_data="toggle_marketing")],
-        [InlineKeyboardButton("⬅️ Back to Account", callback_data="settings_account")]
-    ]
-    
-    await safe_edit_message(
-        q,
-        "🔔 Notification Settings\n\n"
-        "Manage your notification preferences:\n\n"
-        "🚨 Job Alerts: Get notified about new jobs\n"
-        "📄 Application Updates: Status changes on your applications\n"
-        "💬 Messages: Direct messages from employers\n"
-        "📢 Marketing: Updates about HustleX features\n\n"
-        "Tip: You can toggle each notification type on/off below.",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        context=context
-    )
+    try:
+        q = update.callback_query
+        await q.answer()
+        
+        user_id = update.effective_user.id
+        if not hasattr(account_notifications_handler, 'user_notifications'):
+            account_notifications_handler.user_notifications = {}
+        
+        user_prefs = account_notifications_handler.user_notifications.get(user_id, {
+            'job_alerts': True,
+            'application_updates': True,
+            'messages': True,
+            'marketing': False
+        })
+        
+        keyboard = [
+            [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if user_prefs['job_alerts'] else '❌ OFF'}", callback_data="toggle_job_alerts")],
+            [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if user_prefs['application_updates'] else '❌ OFF'}", callback_data="toggle_app_updates")],
+            [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if user_prefs['messages'] else '❌ OFF'}", callback_data="toggle_messages")],
+            [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if user_prefs['marketing'] else '❌ OFF'}", callback_data="toggle_marketing")],
+            [InlineKeyboardButton("⬅️ Back to Account", callback_data="settings_account")]
+        ]
+        
+        await safe_edit_message(
+            q,
+            "🔔 Notification Settings\n\n"
+            "Manage your notification preferences:\n\n"
+            "🚨 Job Alerts: Get notified about new jobs\n"
+            "📄 Application Updates: Status changes on your applications\n"
+            "💬 Messages: Direct messages from employers\n"
+            "📢 Marketing: Updates about HustleX features\n\n"
+            "Tip: Toggle each below.",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            context=context
+        )
+    except Exception as e:
+        try:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Notifications error: {type(e).__name__}: {e}")
+        except:
+            pass
 
 async def account_delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
-    keyboard = [
-        [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
-        [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
-    ]
-    
-    await safe_edit_message(
-        q,
-        "🗑️ Delete Account\n\n"
-        "WARNING: This action is permanent and cannot be undone!\n\n"
-        "What will be deleted:\n"
-        "- Your profile information\n"
-        "- Uploaded CV and documents\n"
-        "- Job application history\n"
-        "- All saved preferences\n\n"
-        "Are you sure you want to permanently delete your account?",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        context=context
-    )
+    try:
+        q = update.callback_query
+        await q.answer()
+        
+        keyboard = [
+            [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
+            [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
+        ]
+        
+        await safe_edit_message(
+            q,
+            "🗑️ Delete Account\n\n"
+            "WARNING: This action is permanent and cannot be undone!\n\n"
+            "What will be deleted:\n"
+            "- Your profile information\n"
+            "- Uploaded CV and documents\n"
+            "- Job application history\n"
+            "- All saved preferences\n\n"
+            "Are you sure you want to permanently delete your account?",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            context=context
+        )
+    except Exception as e:
+        try:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Delete error: {type(e).__name__}: {e}")
+        except:
+            pass
 
 async def privacy_policy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -2216,71 +2229,75 @@ async def privacy_policy_handler(update: Update, context: ContextTypes.DEFAULT_T
 # Notification Toggle Handlers
 # ---------------------------
 async def toggle_notification_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
-    user_id = update.effective_user.id
-    toggle_type = q.data.split('_', 1)[1]  # get part after 'toggle_'
-    
-    # Initialize user notifications if not exists
-    if not hasattr(account_notifications_handler, 'user_notifications'):
-        account_notifications_handler.user_notifications = {}
-    
-    if user_id not in account_notifications_handler.user_notifications:
-        account_notifications_handler.user_notifications[user_id] = {
-            'job_alerts': True,
-            'application_updates': True,
-            'messages': True,
-            'marketing': False
-        }
-    
-    # Toggle the specific notification type
-    current_prefs = account_notifications_handler.user_notifications[user_id]
-    if toggle_type == 'job_alerts':
-        current_prefs['job_alerts'] = not current_prefs['job_alerts']
-        setting_name = "Job Alerts"
-    elif toggle_type == 'app_updates':
-        current_prefs['application_updates'] = not current_prefs['application_updates']
-        setting_name = "Application Updates"
-    elif toggle_type == 'messages':
-        current_prefs['messages'] = not current_prefs['messages']
-        setting_name = "Messages"
-    elif toggle_type == 'marketing':
-        current_prefs['marketing'] = not current_prefs['marketing']
-        setting_name = "Marketing"
-    
-    # Show updated notification settings
-    await account_notifications_handler(update, context)
+    try:
+        q = update.callback_query
+        await q.answer()
+        
+        user_id = update.effective_user.id
+        toggle_type = q.data.split('_', 1)[1]
+        
+        if not hasattr(account_notifications_handler, 'user_notifications'):
+            account_notifications_handler.user_notifications = {}
+        
+        if user_id not in account_notifications_handler.user_notifications:
+            account_notifications_handler.user_notifications[user_id] = {
+                'job_alerts': True,
+                'application_updates': True,
+                'messages': True,
+                'marketing': False
+            }
+        
+        current_prefs = account_notifications_handler.user_notifications[user_id]
+        if toggle_type == 'job_alerts':
+            current_prefs['job_alerts'] = not current_prefs['job_alerts']
+        elif toggle_type == 'app_updates':
+            current_prefs['application_updates'] = not current_prefs['application_updates']
+        elif toggle_type == 'messages':
+            current_prefs['messages'] = not current_prefs['messages']
+        elif toggle_type == 'marketing':
+            current_prefs['marketing'] = not current_prefs['marketing']
+        
+        await account_notifications_handler(update, context)
+    except Exception as e:
+        try:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Toggle error: {type(e).__name__}: {e}")
+        except:
+            pass
 
 async def confirm_delete_account_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    q = update.callback_query
-    await q.answer()
-    
-    user_id = update.effective_user.id
-    
-    delete_user(user_id)
-    
-    if hasattr(account_notifications_handler, 'user_notifications'):
-        account_notifications_handler.user_notifications.pop(user_id, None)
-    
-    keyboard = [
-        [InlineKeyboardButton("🏠 Start Over", callback_data="menu")]
-    ]
-    
-    await safe_edit_message(
-        q,
-        "✅ Account Deleted Successfully\n\n"
-        "Your account has been permanently deleted from HustleX.\n\n"
-        "What was removed:\n"
-        "- Profile information\n"
-        "- Uploaded CV and documents\n"
-        "- Notification preferences\n"
-        "- All saved data\n\n"
-        "Thank you for using HustleX. You can create a new account anytime by using /start.\n\n"
-        "If you have feedback, contact @HustleXSupport",
-        reply_markup=InlineKeyboardMarkup(keyboard),
-        context=context
-    )
+    try:
+        q = update.callback_query
+        await q.answer()
+        
+        user_id = update.effective_user.id
+        delete_user(user_id)
+        
+        if hasattr(account_notifications_handler, 'user_notifications'):
+            account_notifications_handler.user_notifications.pop(user_id, None)
+        
+        keyboard = [
+            [InlineKeyboardButton("🏠 Start Over", callback_data="menu")]
+        ]
+        
+        await safe_edit_message(
+            q,
+            "✅ Account Deleted Successfully\n\n"
+            "Your account has been permanently deleted from HustleX.\n\n"
+            "What was removed:\n"
+            "- Profile information\n"
+            "- Uploaded CV and documents\n"
+            "- Notification preferences\n"
+            "- All saved data\n\n"
+            "Thank you for using HustleX. You can create a new account anytime by using /start.\n\n"
+            "If you have feedback, contact @HustleXSupport",
+            reply_markup=InlineKeyboardMarkup(keyboard),
+            context=context
+        )
+    except Exception as e:
+        try:
+            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Delete confirm error: {type(e).__name__}: {e}")
+        except:
+            pass
 
 # ---------------------------
 # Profile API Integration
