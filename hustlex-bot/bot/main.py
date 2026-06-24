@@ -896,33 +896,35 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif action == 'account_view_profile':
-        user = update.effective_user
-        profile = get_user_profile(user.id)
-        if profile:
-            name = profile.get('name')
-            age = profile.get('age')
-            sex = profile.get('sex')
-            phone = profile.get('phone') or profile.get('phone_number')
-        else:
-            name = age = sex = phone = None
-        text = (
-            f"👤 *Your Profile*\n\n"
-            f"*Personal Info:*\n"
-            f"• *Name:* {name or user.first_name or 'Not set'}\n"
-            f"• *Age:* {age or 'Not set'}\n"
-            f"• *Gender:* {sex or 'Not set'}\n"
-            f"• *Phone:* {phone or 'Not set'}\n"
-            f"• *Username:* @{user.username or 'Not set'}\n"
-            f"• *User ID:* {user.id}\n\n"
-            f"Your profile is your digital handshake — keep it fresh, keep it real, "
-            f"and let clients know exactly who's about to change their world. 🚀"
-        )
-        keyboard = [[KeyboardButton("⬅️ Back to Settings")]]
-        await update.effective_message.reply_text(
-            text,
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
-            parse_mode="Markdown"
-        )
+        try:
+            user = update.effective_user
+            if not user:
+                await update.effective_message.reply_text("Error: could not identify user.")
+                return
+            profile = get_user_profile(user.id)
+            pov = "Not set"
+            name = profile.get('name') if profile else None
+            age = profile.get('age') if profile else None
+            sex = profile.get('sex') if profile else None
+            phone = (profile.get('phone') or profile.get('phone_number')) if profile else None
+            text = (
+                f"👤 Your Profile\n\n"
+                f"Personal Info:\n"
+                f"- Name: {name or user.first_name or pov}\n"
+                f"- Age: {age or pov}\n"
+                f"- Gender: {sex or pov}\n"
+                f"- Phone: {phone or pov}\n"
+                f"- Username: @{user.username or pov}\n"
+                f"- User ID: {user.id}\n\n"
+                f"Your profile is your digital handshake - keep it fresh!"
+            )
+            keyboard = [[KeyboardButton("⬅️ Back to Settings")]]
+            await update.effective_message.reply_text(
+                text,
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+        except Exception as e:
+            await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
         keyboard = [[KeyboardButton("⬅️ Back to Settings")]]
         await update.effective_message.reply_text(
             text,
@@ -1199,48 +1201,41 @@ async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.effective_user
-    profile = get_user_profile(user.id)
-    if profile:
-        name = profile.get('name')
-        age = profile.get('age')
-        sex = profile.get('sex')
-        phone = profile.get('phone') or profile.get('phone_number')
-    else:
-        name = age = sex = phone = None
-    account_text = (
-        f"👤 *Account Settings*\n\n"
-        f"*Personal Info:*\n"
-        f"• *Name:* {name or user.first_name or 'Not set'}\n"
-        f"• *Age:* {age or 'Not set'}\n"
-        f"• *Gender:* {sex or 'Not set'}\n"
-        f"• *Phone:* {phone or 'Not set'}\n"
-        f"• *Username:* @{user.username or 'Not set'}\n"
-        f"• *User ID:* {user.id}\n\n"
-        f"⚙️ Manage your account below:"
-    )
-    keyboard = [
-        [KeyboardButton("👤 View Profile"), KeyboardButton("🔔 Notifications")],
-        [KeyboardButton("🗑️ Delete Account"), KeyboardButton("⬅️ Back to Settings")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
-    if update.callback_query:
-        q = update.callback_query
-        await q.answer()
-        await safe_edit_message(
-            q,
-            account_text,
-            reply_markup=reply_markup,
-            parse_mode="Markdown",
-            context=context
+    try:
+        user = update.effective_user
+        if not user:
+            await update.effective_message.reply_text("Error: could not identify user. Try /start again.")
+            return
+        profile = get_user_profile(user.id)
+        pov = "Not set"
+        account_text = (
+            f"👤 Account Settings\n\n"
+            f"Personal Info:\n"
+            f"- Name: {(profile.get('name') if profile else None) or user.first_name or pov}\n"
+            f"- Age: {(profile.get('age') if profile else None) or pov}\n"
+            f"- Gender: {(profile.get('sex') if profile else None) or pov}\n"
+            f"- Phone: {(profile.get('phone') or profile.get('phone_number') if profile else None) or pov}\n"
+            f"- Username: @{user.username or pov}\n"
+            f"- User ID: {user.id}\n\n"
+            f"Manage your account below:"
         )
-    else:
-        await update.effective_message.reply_text(
-            account_text,
-            reply_markup=reply_markup,
-            parse_mode="Markdown"
-        )
+        keyboard = [
+            [KeyboardButton("👤 View Profile"), KeyboardButton("🔔 Notifications")],
+            [KeyboardButton("🗑️ Delete Account"), KeyboardButton("⬅️ Back to Settings")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        
+        if update.callback_query:
+            q = update.callback_query
+            await q.answer()
+            await safe_edit_message(q, account_text, reply_markup=reply_markup, context=context)
+        else:
+            await update.effective_message.reply_text(account_text, reply_markup=reply_markup)
+    except Exception as e:
+        try:
+            await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
+        except:
+            pass
 
 async def settings_cv_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
