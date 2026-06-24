@@ -7,7 +7,7 @@ import logging
 import sqlite3
 from datetime import datetime
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, ReplyKeyboardMarkup, KeyboardButton, ReplyKeyboardRemove, BotCommand
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telegram.error import TelegramError
 from urllib.parse import urlparse
@@ -2375,18 +2375,18 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
             pass  # If we can't even send a message, just log it
 
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    async def post_init(application):
+        await application.bot.set_my_commands([
+            BotCommand("start", "Main Menu"),
+        ])
+
+    app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     
     # Add error handler
     app.add_error_handler(error_handler)
 
     # Command handlers
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("menu", menu_command))
-    app.add_handler(CommandHandler("about", about_command))
-    app.add_handler(CommandHandler("profile", profile_command))
-    app.add_handler(CommandHandler("applications", applications_command))
-    app.add_handler(CommandHandler("settings", settings_command))
 
     # CallbackQuery handlers (for inline buttons that remain)
     app.add_handler(CallbackQueryHandler(menu_callback, pattern="^menu$"))
