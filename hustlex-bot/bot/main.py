@@ -2730,6 +2730,13 @@ def main():
     app.add_handler(CallbackQueryHandler(toggle_notification_handler, pattern="^toggle_"))
     app.add_handler(CallbackQueryHandler(confirm_delete_account_handler, pattern="^confirm_delete_account$"))
 
+    # Catch-all debug handler for unhandled callbacks
+    async def debug_unhandled_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+        q = update.callback_query
+        await q.answer(text=f"⚠️ Debug: unhandled callback_data='{q.data}'", show_alert=True)
+
+    app.add_handler(CallbackQueryHandler(debug_unhandled_callback))
+
     # File/message handlers
     app.add_handler(MessageHandler(filters.Document.ALL | filters.PHOTO, file_handler))
     
