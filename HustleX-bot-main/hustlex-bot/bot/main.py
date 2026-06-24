@@ -444,14 +444,10 @@ async def show_menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     #     )
     #     return
     
-    # WebApp URLs
-    profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
-    applications_url = f"{WEBAPP_URL.rstrip('/')}/my-applications"
-
-    # Reply keyboard for menu options with WebApp buttons
+    # Reply keyboard for menu options
     reply_keyboard = [
-        [KeyboardButton(messages['profile'], web_app=WebAppInfo(url=profile_url))],
-        [KeyboardButton(messages['applications'], web_app=WebAppInfo(url=applications_url)), KeyboardButton(messages['about'])],
+        [KeyboardButton(messages['profile'])],
+        [KeyboardButton(messages['applications']), KeyboardButton(messages['about'])],
         [KeyboardButton(messages['settings'])]
     ]
     
