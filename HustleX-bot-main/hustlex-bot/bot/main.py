@@ -138,30 +138,8 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Check if user is already registered
     if user_id in registered_users:
-        # Registered user - show normal welcome message with menu
-        welcome_text = (
-            f"Welcome back, {first_name}! 🚀\n\n"
-            f"👤 My Profile: to update your profile\n\n"
-            f"📋 Applications: Track the status of all your applications\n\n"
-            f"ℹ️ About HustleX: Learn more about our platform\n\n"
-            f"⚙️ Settings: to customize your preferences\n\n"
-            f"🌐 https://hustlexet.vercel.app/"
-        )
-        
-        keyboard = [[KeyboardButton("📱 Menu")]]
-        
-        if update.effective_message:
-            await update.effective_message.reply_text(
-                welcome_text,
-                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
-                disable_web_page_preview=True
-            )
-        else:
-            await update.effective_chat.send_message(
-                welcome_text,
-                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False),
-                disable_web_page_preview=True
-            )
+        await show_menu(update, context)
+        return
     else:
         # New user - prompt to register
         register_text = (
@@ -279,9 +257,7 @@ async def handle_registration_input(update: Update, context: ContextTypes.DEFAUL
         del registration_state[user_id]
         
         # Show success message
-        profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
         keyboard = [
-            [KeyboardButton("👤 Complete Profile", web_app=WebAppInfo(url=profile_url))],
             [KeyboardButton("📱 Menu")]
         ]
         
@@ -505,22 +481,16 @@ async def applications_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         q = update.callback_query
         await q.answer()
 
-    applications_url = f"{WEBAPP_URL.rstrip('/')}/my-applications"
-
-    # Reply keyboard with WebApp button (no inline keyboard)
-    reply_keyboard = [
-        [KeyboardButton("🌐 Open Applications", web_app=WebAppInfo(url=applications_url))],
-        [KeyboardButton("⬅️ Back to Menu")]
-    ]
+    applications_url = "https://hustlexet.vercel.app/my-applications"
 
     # Clean up old message to prevent keyboard interference
     await try_delete_user_message(update, context)
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="📋 *Applications*\n\nTap the button below to view and track all your applications on HustleX.",
+        text=f"📋 *Applications*\n\nClick here to view your applications: {applications_url}",
         parse_mode="Markdown",
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
+        disable_web_page_preview=True
     )
 
 async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -1256,22 +1226,15 @@ async def account_edit_profile_handler(update: Update, context: ContextTypes.DEF
         q = update.callback_query
         await q.answer()
 
-    profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup"
+    profile_url = "https://hustlexet.vercel.app/freelancer-profile-setup"
 
-    # Reply keyboard with WebApp button
-    reply_keyboard = [
-        [KeyboardButton("👤 Open Profile", web_app=WebAppInfo(url=profile_url))],
-        [KeyboardButton("⬅️ Back to Menu")]
-    ]
-
-    # Clean up old message to prevent keyboard interference
     await try_delete_user_message(update, context)
 
     await context.bot.send_message(
         chat_id=update.effective_chat.id,
-        text="👤 *Profile*\n\nTap the button below to set up or edit your freelancer profile.",
+        text=f"👤 *Profile*\n\nEdit your profile here: {profile_url}",
         parse_mode="Markdown",
-        reply_markup=ReplyKeyboardMarkup(reply_keyboard, resize_keyboard=True, one_time_keyboard=False)
+        disable_web_page_preview=True
     )
 
 # Profile Wizard - Step by step profile editing
