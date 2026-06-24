@@ -764,7 +764,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     elif action == 'profile':
         job_id = get_pending_job_id(context)
         profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?job_id={job_id}"
-        keyboard = [[InlineKeyboardButton("👤 Open Profile", url=profile_url)]]
+        keyboard = [[InlineKeyboardButton("👤 Open Profile", web_app=WebAppInfo(url=profile_url))]]
         await update.effective_message.reply_text(
             "👤 *Your Profile Arsenal*\n\n"
             "Your profile is your **digital throne** — the kingdom where clients discover your genius. "
@@ -782,9 +782,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif action == 'applications':
         applications_url = "https://hustlexet.vercel.app/my-applications"
-        keyboard = [[InlineKeyboardButton("📋 Open Applications", url=applications_url)]]
+        keyboard = [[InlineKeyboardButton("📋 Open Applications", web_app=WebAppInfo(url=applications_url))]]
         await update.effective_message.reply_text(
-            "📋 *Applications*\n\nClick below to view your applications:",
+            "📋 *Your Applications Command Center*\n\n"
+            "This is where **opportunities meet their match** — every application is a **battle won** "
+            "before the war even starts. You don't just apply; you **dominate**.\n\n"
+            "Track your conquests:\n"
+            "• 🎯 **Live Status** — Know exactly where you stand\n"
+            "• ⚡ **Instant Replies** — Clients move at the speed of trust\n"
+            "• 📊 **Win Rate** — Watch your hit rate climb\n"
+            "• 🔔 **Smart Alerts** — Never miss a callback\n\n"
+            "Every 'Submitted' is a **step closer to your empire**. "
+            "Every 'Accepted' is a **crown on your legacy**.\n\n"
+            "Let's go get that bag 💼🔥",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
