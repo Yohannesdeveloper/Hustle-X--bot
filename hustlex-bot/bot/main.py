@@ -519,10 +519,15 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Build menu message
     menu_text = f"{messages['title']}\n\n"
-    menu_text += f"📋 {messages['applications']} - {messages['applications_desc']}\n"
-    menu_text += f"👤 {messages['profile']} - {messages['profile_desc']}\n"
-    menu_text += f"⚙️ {messages['settings']} - {messages['settings_desc']}\n"
-    menu_text += f"ℹ️ {messages['about']} - {messages['about_desc']}\n\n"
+    menu_text += "🔥 *Welcome to the Arena, Champion!* 🔥\n\n"
+    menu_text += "You're now in the *HustleX command center* — where freelancers become legends "\
+                 "and clients find their secret weapons. Every tab is a tool. Every click is a power-up.\n\n"
+    menu_text += "*⚔️ Your Arsenal:*\n"
+    menu_text += f"📋 {messages['applications']} — Track your conquests, seal the deals\n"
+    menu_text += f"👤 {messages['profile']} — Your digital throne, flex your empire\n"
+    menu_text += f"⚙️ {messages['settings']} — Calibrate your battlefield\n"
+    menu_text += f"ℹ️ {messages['about']} — Know the kingdom you're building in\n\n"
+    menu_text += "Let's make moves. 🚀\n\n"
     menu_text += messages['footer']
     
     if update.effective_message:
