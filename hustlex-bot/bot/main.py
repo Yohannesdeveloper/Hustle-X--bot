@@ -423,7 +423,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Language-specific menu messages
     menu_messages = {
         'en': {
-            'title': "Choose a tab:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nChoose a tab:",
             'profile': "Profile",
             'profile_desc': "Manage your freelancer profile and CV",
             'applications': "Applications",
@@ -432,9 +432,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Learn more about HustleX platform",
             'settings': "Settings",
             'settings_desc': "Configure your preferences and account",
+            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
         },
         'es': {
-            'title': "Elige una pestaña:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nElige una pestaña:",
             'profile': "Perfil",
             'profile_desc': "Gestiona tu perfil de freelancer y CV",
             'applications': "Aplicaciones",
@@ -443,9 +444,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Conoce más sobre la plataforma HustleX",
             'settings': "Configuración",
             'settings_desc': "Configura tus preferencias y cuenta",
+            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
         },
         'fr': {
-            'title': "Choisissez un onglet:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nChoisissez un onglet:",
             'profile': "Profil",
             'profile_desc': "Gérez votre profil de freelance et CV",
             'applications': "Candidatures",
@@ -454,9 +456,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "En savoir plus sur la plateforme HustleX",
             'settings': "Paramètres",
             'settings_desc': "Configurez vos préférences et compte",
+            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
         },
         'de': {
-            'title': "Wählen Sie einen Tab:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nWählen Sie einen Tab:",
             'profile': "Profil",
             'profile_desc': "Verwalten Sie Ihr Freelancer-Profil und CV",
             'applications': "Bewerbungen",
@@ -465,9 +468,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Erfahren Sie mehr über die HustleX-Plattform",
             'settings': "Einstellungen",
             'settings_desc': "Konfigurieren Sie Ihre Präferenzen und Konto",
+            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
         },
         'it': {
-            'title': "Scegli una scheda:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nScegli una scheda:",
             'profile': "Profilo",
             'profile_desc': "Gestisci il tuo profilo freelance e CV",
             'applications': "Candidature",
@@ -476,9 +480,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Scopri di più sulla piattaforma HustleX",
             'settings': "Impostazioni",
             'settings_desc': "Configura le tue preferenze e account",
+            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
         },
         'pt': {
-            'title': "Escolha uma aba:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nEscolha uma aba:",
             'profile': "Perfil",
             'profile_desc': "Gerencie seu perfil de freelancer e CV",
             'applications': "Candidaturas",
@@ -487,9 +492,10 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Saiba mais sobre a plataforma HustleX",
             'settings': "Configurações",
             'settings_desc': "Configure suas preferências e conta",
+            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
         },
         'am': {
-            'title': "አንድ ትር ይምረጡ:",
+            'title': "🌐 https://hustlexet.vercel.app/\n\nአንድ ትር ይምረጡ:",
             'profile': "መገለጫ",
             'profile_desc': "የእርስዎን ፍሪላንሰር መገለጫ እና CV ያስተዳድሩ",
             'applications': "ማመልከቻዎች",
@@ -498,6 +504,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "ስለ HustleX መድረክ የበለጠ ይወቁ",
             'settings': "ቅንብሮች",
             'settings_desc': "የእርስዎን ምርጫዎች እና መለያ ያስተካክሉ",
+            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
         }
     }
     
@@ -515,7 +522,8 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_text += f"📋 {messages['applications']} - {messages['applications_desc']}\n"
     menu_text += f"👤 {messages['profile']} - {messages['profile_desc']}\n"
     menu_text += f"⚙️ {messages['settings']} - {messages['settings_desc']}\n"
-    menu_text += f"ℹ️ {messages['about']} - {messages['about_desc']}"
+    menu_text += f"ℹ️ {messages['about']} - {messages['about_desc']}\n\n"
+    menu_text += messages['footer']
     
     if update.effective_message:
         await update.effective_message.reply_text(menu_text, reply_markup=reply_markup)
