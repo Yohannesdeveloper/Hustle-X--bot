@@ -897,11 +897,27 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
     elif action == 'account_view_profile':
         user = update.effective_user
+        profile = get_user_profile(user.id)
+        name = profile.get('name') if profile else None
+        age = profile.get('age') if profile else None
+        sex = profile.get('sex') if profile else None
+        phone = profile.get('phone') or profile.get('phone_number') if profile else None
+        text = (
+            f"👤 *Your Profile*\n\n"
+            f"*Personal Info:*\n"
+            f"• **Name:** {name or user.first_name or 'Not set'}\n"
+            f"• **Age:** {age or 'Not set'}\n"
+            f"• **Gender:** {sex or 'Not set'}\n"
+            f"• **Phone:** {phone or 'Not set'}\n"
+            f"• **Username:** @{user.username or 'Not set'}\n"
+            f"• **User ID:** `{user.id}`\n\n"
+            f"Your profile is your **digital handshake** — keep it fresh, keep it real, "
+            f"and let clients know exactly who's about to change their world. 🚀"
+        )
+        keyboard = [[KeyboardButton("⬅️ Back to Account Settings")]]
         await update.effective_message.reply_text(
-            f"👤 *Profile Information*\n\n"
-            f"• Name: {user.first_name or 'Not set'}\n"
-            f"• Username: @{user.username or 'Not set'}\n"
-            f"• User ID: {user.id}",
+            text,
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
         )
     elif action == 'account_notifications':
@@ -1175,6 +1191,22 @@ async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TY
 
 async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
+    profile = get_user_profile(user.id)
+    name = profile.get('name') if profile else None
+    age = profile.get('age') if profile else None
+    sex = profile.get('sex') if profile else None
+    phone = profile.get('phone') or profile.get('phone_number') if profile else None
+    account_text = (
+        f"👤 *Account Settings*\n\n"
+        f"*Personal Info:*\n"
+        f"• **Name:** {name or user.first_name or 'Not set'}\n"
+        f"• **Age:** {age or 'Not set'}\n"
+        f"• **Gender:** {sex or 'Not set'}\n"
+        f"• **Phone:** {phone or 'Not set'}\n"
+        f"• **Username:** @{user.username or 'Not set'}\n"
+        f"• **User ID:** `{user.id}`\n\n"
+        f"*⚙️ Manage your account below:*"
+    )
     keyboard = [
         [KeyboardButton("👤 View Profile"), KeyboardButton("🔔 Notifications")],
         [KeyboardButton("🗑️ Delete Account"), KeyboardButton("⬅️ Back to Settings")]
@@ -1186,24 +1218,14 @@ async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
         await q.answer()
         await safe_edit_message(
             q,
-            f"👤 *Account Settings*\n\n"
-            f"📋 *Profile Information:*\n"
-            f"• Name: {user.first_name or 'Not set'}\n"
-            f"• Username: @{user.username or 'Not set'}\n"
-            f"• User ID: {user.id}\n\n"
-            f"⚙️ Manage your account settings below:",
+            account_text,
             reply_markup=reply_markup,
             parse_mode="Markdown",
             context=context
         )
     else:
         await update.effective_message.reply_text(
-            f"👤 *Account Settings*\n\n"
-            f"📋 *Profile Information:*\n"
-            f"• Name: {user.first_name or 'Not set'}\n"
-            f"• Username: @{user.username or 'Not set'}\n"
-            f"• User ID: {user.id}\n\n"
-            f"⚙️ Manage your account settings below:",
+            account_text,
             reply_markup=reply_markup,
             parse_mode="Markdown"
         )
