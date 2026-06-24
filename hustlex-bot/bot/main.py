@@ -13,6 +13,7 @@ from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandle
 from telegram.error import TelegramError
 from urllib.parse import urlparse
 import aiohttp
+import io
 from pymongo import MongoClient
 from pymongo.errors import ConnectionFailure
 
@@ -139,6 +140,20 @@ def register_user(user_id: int, username: str = None, first_name: str = None) ->
     except Exception as e:
         logger.error(f"Error registering user: {e}")
         return False
+
+def get_user_cv(user_id: int):
+    database = get_db()
+    if database is None:
+        return None
+    try:
+        profile = database.profiles.find_one(
+            {"user_id": user_id},
+            {"cv_file_data": 1, "cv_filename": 1, "cv_mime_type": 1}
+        )
+        return profile
+    except Exception as e:
+        logger.error(f"Error loading CV for {user_id}: {e}")
+        return None
 
 def save_profile_fields(user_id: int, fields: dict) -> bool:
     database = get_db()
@@ -945,66 +960,38 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         except Exception as e:
             await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
     elif action == 'account_notifications':
-        try:
-            user_id = update.effective_user.id
-            if not hasattr(account_notifications_handler, 'user_notifications'):
-                account_notifications_handler.user_notifications = {}
-            user_prefs = account_notifications_handler.user_notifications.get(user_id, {
-                'job_alerts': True,
-                'application_updates': True,
-                'messages': True,
-                'marketing': False
-            })
-            keyboard = [
-                [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if user_prefs['job_alerts'] else '❌ OFF'}", callback_data="toggle_job_alerts")],
-                [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if user_prefs['application_updates'] else '❌ OFF'}", callback_data="toggle_app_updates")],
-                [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if user_prefs['messages'] else '❌ OFF'}", callback_data="toggle_messages")],
-                [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if user_prefs['marketing'] else '❌ OFF'}", callback_data="toggle_marketing")],
-            ]
-            await update.effective_message.reply_text(
-                "🔔 Notification Settings\n\n"
-                "Manage your notification preferences:\n\n"
-                "🚨 Job Alerts: Get notified about new jobs\n"
-                "📄 Application Updates: Status changes on your applications\n"
-                "💬 Messages: Direct messages from employers\n"
-                "📢 Marketing: Updates about HustleX features\n\n"
-                "Tip: Toggle each below.",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        except Exception as e:
-            await update.effective_message.reply_text(f"Notif error: {type(e).__name__}: {e}")
+        await send_notification_settings(update, context)
     elif action == 'account_delete':
-        try:
-            keyboard = [
-                [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
-                [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
-            ]
-            await update.effective_message.reply_text(
-                "🗑️ Delete Account\n\n"
-                "WARNING: This action is permanent and cannot be undone!\n\n"
-                "What will be deleted:\n"
-                "- Your profile information\n"
-                "- Uploaded CV and documents\n"
-                "- Job application history\n"
-                "- All saved preferences\n\n"
-                "Are you sure you want to permanently delete your account?",
-                reply_markup=InlineKeyboardMarkup(keyboard)
-            )
-        except Exception as e:
-            await update.effective_message.reply_text(f"Delete error: {type(e).__name__}: {e}")
+        await send_delete_confirmation(update, context)
     elif action == 'cv_view':
         user_id = update.effective_user.id
-        if user_id in user_cvs and user_cvs[user_id]:
-            cv_info = user_cvs[user_id]
-            await update.effective_message.reply_text(f"👁️ *Your CV*\n\nFile: {cv_info.get('filename', 'Unknown')}", parse_mode="Markdown")
+        cv_data = get_user_cv(user_id)
+        if cv_data is not None and cv_data.get("cv_file_data") is not None:
+            file_bytes = cv_data["cv_file_data"]
+            filename = cv_data.get("cv_filename", "cv.pdf")
+            await update.effective_message.reply_text(f"👁️ *Your CV*\n\n📁 *File:* {filename}\n\n📎 Sending file...", parse_mode="Markdown")
+            await context.bot.send_document(
+                chat_id=user_id,
+                document=io.BytesIO(file_bytes if isinstance(file_bytes, bytes) else bytes(file_bytes)),
+                filename=filename,
+                caption=f"📄 Your CV: {filename}"
+            )
         else:
             await update.effective_message.reply_text("❌ No CV uploaded yet!", parse_mode="Markdown")
     elif action == 'cv_upload':
         await update.effective_message.reply_text("📤 *Upload CV*\n\nPlease send your CV file as a document (PDF or DOCX).", parse_mode="Markdown")
     elif action == 'cv_remove':
         user_id = update.effective_user.id
-        if user_id in user_cvs:
-            del user_cvs[user_id]
+        cv_data = get_user_cv(user_id)
+        if cv_data is not None and cv_data.get("cv_file_data") is not None:
+            save_profile_fields(user_id, {
+                "cv_file_data": None,
+                "cv_filename": None,
+                "cv_mime_type": None,
+                "cv_file_size": None,
+                "cv_upload_date": None,
+            })
+            user_cvs.pop(user_id, None)
             await update.effective_message.reply_text("✅ CV removed successfully!", parse_mode="Markdown")
         else:
             await update.effective_message.reply_text("❌ No CV to remove!", parse_mode="Markdown")
@@ -1296,15 +1283,16 @@ async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def settings_cv_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    has_cv = user_id in user_cvs and user_cvs[user_id] is not None
+    cv_data = get_user_cv(user_id)
+    has_cv = cv_data is not None and cv_data.get("cv_file_data") is not None
     
     if has_cv:
-        cv_info = user_cvs[user_id]
+        filename = cv_data.get("cv_filename", "Unknown")
         keyboard = [
             [KeyboardButton("👁️ View Current CV"), KeyboardButton("📤 Upload New CV")],
             [KeyboardButton("🗑️ Remove CV"), KeyboardButton("⬅️ Back to Settings")]
         ]
-        status_text = f"✅ CV uploaded: {cv_info.get('filename', 'Unknown')}"
+        status_text = f"✅ CV uploaded: {filename}"
     else:
         keyboard = [
             [KeyboardButton("📤 Upload New CV"), KeyboardButton("⬅️ Back to Settings")]
@@ -1487,29 +1475,38 @@ async def cv_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     
     user_id = update.effective_user.id
+    cv_data = get_user_cv(user_id)
     
-    if user_id in user_cvs and user_cvs[user_id] is not None:
-        cv_info = user_cvs[user_id]
+    if cv_data is not None and cv_data.get("cv_file_data") is not None:
+        file_bytes = cv_data["cv_file_data"]
+        filename = cv_data.get("cv_filename", "cv.pdf")
+        mime_type = cv_data.get("cv_mime_type", "application/pdf")
+        
+        # Send the CV file directly to the user
+        await q.edit_message_text(
+            f"👁️ *Sending your CV...*\n\n"
+            f"📁 *File:* {filename}",
+            parse_mode="Markdown"
+        )
+        
+        await context.bot.send_document(
+            chat_id=user_id,
+            document=io.BytesIO(file_bytes if isinstance(file_bytes, bytes) else bytes(file_bytes)),
+            filename=filename,
+            caption=f"📄 Your CV: {filename}"
+        )
+        
         keyboard = [
             [InlineKeyboardButton("📤 Upload New CV", callback_data="cv_upload")],
             [InlineKeyboardButton("🗑️ Remove CV", callback_data="cv_remove")],
             [InlineKeyboardButton("⬅️ Back to My CV", callback_data="settings_cv")]
         ]
         
-        await safe_edit_message(
-            q,
-            f"👁️ *View CV*\n\n"
-            f"📁 *File:* {cv_info.get('filename', 'Unknown')}\n"
-            f"📏 *Size:* {cv_info.get('file_size', 'Unknown')} bytes\n"
-            f"📅 *Uploaded:* {cv_info.get('upload_date', 'Unknown')}\n\n"
-            f"📝 *Your CV is ready for:*\n"
-            f"• Sharing with potential employers\n"
-            f"• Job applications through HustleX\n"
-            f"• Profile showcasing\n\n"
-            f"💼 *Want to update or remove your CV?*",
+        await context.bot.send_message(
+            chat_id=user_id,
+            text="💼 *Want to update or remove your CV?*",
             reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown",
-            context=context
+            parse_mode="Markdown"
         )
     else:
         keyboard = [
@@ -1540,11 +1537,21 @@ async def cv_remove_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     
     user_id = update.effective_user.id
+    cv_data = get_user_cv(user_id)
+    has_cv = cv_data is not None and cv_data.get("cv_file_data") is not None
     
-    # Check if user has a CV
-    if user_id in user_cvs and user_cvs[user_id] is not None:
-        # Remove the CV from storage
-        del user_cvs[user_id]
+    if has_cv:
+        # Remove CV from MongoDB
+        save_profile_fields(user_id, {
+            "cv_file_data": None,
+            "cv_filename": None,
+            "cv_mime_type": None,
+            "cv_file_size": None,
+            "cv_upload_date": None,
+        })
+        
+        # Remove from in-memory too
+        user_cvs.pop(user_id, None)
         
         keyboard = [
             [InlineKeyboardButton("📤 Upload New CV", callback_data="cv_upload")],
@@ -2113,77 +2120,79 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 parse_mode="Markdown"
             )
 
+_shared_notif_prefs = {}
+
+async def get_notif_keyboard(user_id):
+    if user_id not in _shared_notif_prefs:
+        _shared_notif_prefs[user_id] = {'job_alerts': True, 'application_updates': True, 'messages': True, 'marketing': False}
+    prefs = _shared_notif_prefs[user_id]
+    return [
+        [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if prefs['job_alerts'] else '❌ OFF'}", callback_data="toggle_job_alerts")],
+        [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if prefs['application_updates'] else '❌ OFF'}", callback_data="toggle_app_updates")],
+        [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if prefs['messages'] else '❌ OFF'}", callback_data="toggle_messages")],
+        [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if prefs['marketing'] else '❌ OFF'}", callback_data="toggle_marketing")],
+        [InlineKeyboardButton("⬅️ Back to Account", callback_data="settings_account")]
+    ]
+
+NOTIF_TEXT = ("🔔 Notification Settings\n\n"
+    "Manage your notification preferences:\n\n"
+    "🚨 Job Alerts: Get notified about new jobs\n"
+    "📄 Application Updates: Status changes on your applications\n"
+    "💬 Messages: Direct messages from employers\n"
+    "📢 Marketing: Updates about HustleX features\n\n"
+    "Tip: Toggle each below.")
+
+DELETE_TEXT = ("🗑️ Delete Account\n\n"
+    "WARNING: This action is permanent and cannot be undone!\n\n"
+    "What will be deleted:\n"
+    "- Your profile information\n"
+    "- Uploaded CV and documents\n"
+    "- Job application history\n"
+    "- All saved preferences\n\n"
+    "Are you sure you want to permanently delete your account?")
+
+DELETE_KEYBOARD = InlineKeyboardMarkup([
+    [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
+    [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
+])
+
+async def send_notification_settings(update, context):
+    user_id = update.effective_user.id
+    kb = await get_notif_keyboard(user_id)
+    await update.effective_message.reply_text(NOTIF_TEXT, reply_markup=InlineKeyboardMarkup(kb))
+
+async def send_delete_confirmation(update, context):
+    await update.effective_message.reply_text(DELETE_TEXT, reply_markup=DELETE_KEYBOARD)
 
 async def account_notifications_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         q = update.callback_query
         await q.answer()
-        
         user_id = update.effective_user.id
-        if not hasattr(account_notifications_handler, 'user_notifications'):
-            account_notifications_handler.user_notifications = {}
-        
-        user_prefs = account_notifications_handler.user_notifications.get(user_id, {
-            'job_alerts': True,
-            'application_updates': True,
-            'messages': True,
-            'marketing': False
-        })
-        
-        keyboard = [
-            [InlineKeyboardButton(f"🚨 Job Alerts: {'✅ ON' if user_prefs['job_alerts'] else '❌ OFF'}", callback_data="toggle_job_alerts")],
-            [InlineKeyboardButton(f"📄 Application Updates: {'✅ ON' if user_prefs['application_updates'] else '❌ OFF'}", callback_data="toggle_app_updates")],
-            [InlineKeyboardButton(f"💬 Messages: {'✅ ON' if user_prefs['messages'] else '❌ OFF'}", callback_data="toggle_messages")],
-            [InlineKeyboardButton(f"📢 Marketing: {'✅ ON' if user_prefs['marketing'] else '❌ OFF'}", callback_data="toggle_marketing")],
-            [InlineKeyboardButton("⬅️ Back to Account", callback_data="settings_account")]
-        ]
-        
-        await safe_edit_message(
-            q,
-            "🔔 Notification Settings\n\n"
-            "Manage your notification preferences:\n\n"
-            "🚨 Job Alerts: Get notified about new jobs\n"
-            "📄 Application Updates: Status changes on your applications\n"
-            "💬 Messages: Direct messages from employers\n"
-            "📢 Marketing: Updates about HustleX features\n\n"
-            "Tip: Toggle each below.",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            context=context
-        )
+        kb = await get_notif_keyboard(user_id)
+        await safe_edit_message(q, NOTIF_TEXT, reply_markup=InlineKeyboardMarkup(kb), context=context)
     except Exception as e:
         try:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Notifications error: {type(e).__name__}: {e}")
+            await q.answer(text=f"Notif error: {type(e).__name__}: {e}", show_alert=True)
         except:
-            pass
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Notif error: {type(e).__name__}: {e}")
+            except:
+                pass
 
 async def account_delete_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         q = update.callback_query
         await q.answer()
-        
-        keyboard = [
-            [InlineKeyboardButton("⚠️ Yes, Delete My Account", callback_data="confirm_delete_account")],
-            [InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
-        ]
-        
-        await safe_edit_message(
-            q,
-            "🗑️ Delete Account\n\n"
-            "WARNING: This action is permanent and cannot be undone!\n\n"
-            "What will be deleted:\n"
-            "- Your profile information\n"
-            "- Uploaded CV and documents\n"
-            "- Job application history\n"
-            "- All saved preferences\n\n"
-            "Are you sure you want to permanently delete your account?",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            context=context
-        )
+        await safe_edit_message(q, DELETE_TEXT, reply_markup=DELETE_KEYBOARD, context=context)
     except Exception as e:
         try:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Delete error: {type(e).__name__}: {e}")
+            await q.answer(text=f"Delete error: {type(e).__name__}: {e}", show_alert=True)
         except:
-            pass
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Delete error: {type(e).__name__}: {e}")
+            except:
+                pass
 
 async def privacy_policy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -2232,37 +2241,32 @@ async def toggle_notification_handler(update: Update, context: ContextTypes.DEFA
     try:
         q = update.callback_query
         await q.answer()
-        
         user_id = update.effective_user.id
         toggle_type = q.data.split('_', 1)[1]
         
-        if not hasattr(account_notifications_handler, 'user_notifications'):
-            account_notifications_handler.user_notifications = {}
+        if user_id not in _shared_notif_prefs:
+            _shared_notif_prefs[user_id] = {'job_alerts': True, 'application_updates': True, 'messages': True, 'marketing': False}
         
-        if user_id not in account_notifications_handler.user_notifications:
-            account_notifications_handler.user_notifications[user_id] = {
-                'job_alerts': True,
-                'application_updates': True,
-                'messages': True,
-                'marketing': False
-            }
-        
-        current_prefs = account_notifications_handler.user_notifications[user_id]
+        prefs = _shared_notif_prefs[user_id]
         if toggle_type == 'job_alerts':
-            current_prefs['job_alerts'] = not current_prefs['job_alerts']
+            prefs['job_alerts'] = not prefs['job_alerts']
         elif toggle_type == 'app_updates':
-            current_prefs['application_updates'] = not current_prefs['application_updates']
+            prefs['application_updates'] = not prefs['application_updates']
         elif toggle_type == 'messages':
-            current_prefs['messages'] = not current_prefs['messages']
+            prefs['messages'] = not prefs['messages']
         elif toggle_type == 'marketing':
-            current_prefs['marketing'] = not current_prefs['marketing']
+            prefs['marketing'] = not prefs['marketing']
         
-        await account_notifications_handler(update, context)
+        kb = await get_notif_keyboard(user_id)
+        await safe_edit_message(q, NOTIF_TEXT, reply_markup=InlineKeyboardMarkup(kb), context=context)
     except Exception as e:
         try:
-            await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Toggle error: {type(e).__name__}: {e}")
+            await q.answer(text=f"Toggle error: {type(e).__name__}: {e}", show_alert=True)
         except:
-            pass
+            try:
+                await context.bot.send_message(chat_id=update.effective_chat.id, text=f"Toggle error: {type(e).__name__}: {e}")
+            except:
+                pass
 
 async def confirm_delete_account_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
@@ -2271,13 +2275,9 @@ async def confirm_delete_account_handler(update: Update, context: ContextTypes.D
         
         user_id = update.effective_user.id
         delete_user(user_id)
+        _shared_notif_prefs.pop(user_id, None)
         
-        if hasattr(account_notifications_handler, 'user_notifications'):
-            account_notifications_handler.user_notifications.pop(user_id, None)
-        
-        keyboard = [
-            [InlineKeyboardButton("🏠 Start Over", callback_data="menu")]
-        ]
+        keyboard = [[InlineKeyboardButton("🏠 Start Over", callback_data="menu")]]
         
         await safe_edit_message(
             q,
@@ -2341,7 +2341,25 @@ async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Validate file type
         if file_name.lower().endswith(('.pdf', '.docx')) or mime_type in ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
-            # Store CV information
+            # Download actual file bytes from Telegram
+            try:
+                tele_file = await context.bot.get_file(m.document.file_id)
+                file_bytes = await tele_file.download_as_bytearray()
+            except Exception as e:
+                logger.error(f"Failed to download CV file: {e}")
+                file_bytes = None
+            
+            # Save to MongoDB
+            cv_fields = {
+                "cv_file_data": file_bytes,
+                "cv_filename": file_name,
+                "cv_mime_type": mime_type,
+                "cv_file_size": file_size,
+                "cv_upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            }
+            save_profile_fields(user_id, cv_fields)
+            
+            # Also keep in-memory for fast access
             user_cvs[user_id] = {
                 'file_id': m.document.file_id,
                 'filename': file_name,
@@ -2726,3 +2744,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+

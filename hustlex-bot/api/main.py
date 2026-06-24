@@ -125,12 +125,10 @@ async def save_profile(
         cv_upload = form.get("cv")
 
     if cv_upload and getattr(cv_upload, "filename", None):
-        file_path = f"/tmp/cv/{user_id}_{cv_upload.filename}"
-        os.makedirs(os.path.dirname(file_path), exist_ok=True)
         content = await cv_upload.read()
-        async with aiofiles.open(file_path, "wb") as f:
-            await f.write(content)
-        profile_data["cv_file_path"] = file_path
+        profile_data["cv_file_data"] = content
+        profile_data["cv_filename"] = cv_upload.filename
+        profile_data["cv_mime_type"] = cv_upload.content_type or "application/pdf"
 
     if profile_pic and profile_pic.filename:
         pic_path = f"/tmp/profile_pics/{user_id}_{profile_pic.filename}"
@@ -275,6 +273,24 @@ async def serve_register_page():
 async def serve_profile_setup_page():
     html_path = Path(__file__).resolve().parent.parent / "freelancer-profile-setup.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+@app.get("/api/cv/{user_id}")
+async def get_cv(user_id: int):
+    database = get_db()
+    if not database:
+        raise HTTPException(status_code=500, detail="Could not connect to database")
+    profile = database.profiles.find_one({"user_id": user_id})
+    if not profile or not profile.get("cv_file_data"):
+        raise HTTPException(status_code=404, detail="CV not found")
+    cv_data = profile["cv_file_data"]
+    filename = profile.get("cv_filename", "cv.pdf")
+    mime_type = profile.get("cv_mime_type", "application/pdf")
+    from fastapi.responses import Response
+    return Response(
+        content=cv_data if isinstance(cv_data, bytes) else bytes(cv_data),
+        media_type=mime_type,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'}
+    )
 
 @app.get("/job-details/{job_id}", response_class=HTMLResponse)
 async def serve_job_details_page(job_id: str):
