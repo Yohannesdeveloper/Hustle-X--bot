@@ -8,7 +8,7 @@ import json
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, MenuButtonCommands
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler
 from telegram.error import TelegramError
 from urllib.parse import urlparse
@@ -423,7 +423,7 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Language-specific menu messages
     menu_messages = {
         'en': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nChoose a tab:",
+            'title': "Choose a tab:",
             'profile': "Profile",
             'profile_desc': "Manage your freelancer profile and CV",
             'applications': "Applications",
@@ -432,10 +432,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Learn more about HustleX platform",
             'settings': "Settings",
             'settings_desc': "Configure your preferences and account",
-            'error': "❌ Error: WebApp URL is unreachable. Please try again later or contact support."
         },
         'es': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nElige una pestaña:",
+            'title': "Elige una pestaña:",
             'profile': "Perfil",
             'profile_desc': "Gestiona tu perfil de freelancer y CV",
             'applications': "Aplicaciones",
@@ -444,10 +443,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Conoce más sobre la plataforma HustleX",
             'settings': "Configuración",
             'settings_desc': "Configura tus preferencias y cuenta",
-            'error': "❌ Error: La URL de la aplicación web no es accesible. Por favor, inténtalo de nuevo más tarde o contacta con soporte."
         },
         'fr': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nChoisissez un onglet:",
+            'title': "Choisissez un onglet:",
             'profile': "Profil",
             'profile_desc': "Gérez votre profil de freelance et CV",
             'applications': "Candidatures",
@@ -456,10 +454,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "En savoir plus sur la plateforme HustleX",
             'settings': "Paramètres",
             'settings_desc': "Configurez vos préférences et compte",
-            'error': "❌ Erreur: L'URL de l'application web est inaccessible. Veuillez réessayer plus tard ou contacter le support."
         },
         'de': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nWählen Sie einen Tab:",
+            'title': "Wählen Sie einen Tab:",
             'profile': "Profil",
             'profile_desc': "Verwalten Sie Ihr Freelancer-Profil und CV",
             'applications': "Bewerbungen",
@@ -468,10 +465,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Erfahren Sie mehr über die HustleX-Plattform",
             'settings': "Einstellungen",
             'settings_desc': "Konfigurieren Sie Ihre Präferenzen und Konto",
-            'error': "❌ Fehler: WebApp-URL ist nicht erreichbar. Bitte versuchen Sie es später erneut oder kontaktieren Sie den Support."
         },
         'it': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nScegli una scheda:",
+            'title': "Scegli una scheda:",
             'profile': "Profilo",
             'profile_desc': "Gestisci il tuo profilo freelance e CV",
             'applications': "Candidature",
@@ -480,10 +476,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Scopri di più sulla piattaforma HustleX",
             'settings': "Impostazioni",
             'settings_desc': "Configura le tue preferenze e account",
-            'error': "❌ Errore: L'URL dell'applicazione web non è raggiungibile. Riprova più tardi o contatta il supporto."
         },
         'pt': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nEscolha uma aba:",
+            'title': "Escolha uma aba:",
             'profile': "Perfil",
             'profile_desc': "Gerencie seu perfil de freelancer e CV",
             'applications': "Candidaturas",
@@ -492,10 +487,9 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "Saiba mais sobre a plataforma HustleX",
             'settings': "Configurações",
             'settings_desc': "Configure suas preferências e conta",
-            'error': "❌ Erro: A URL da aplicação web não está acessível. Tente novamente mais tarde ou entre em contato com o suporte."
         },
         'am': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nአንድ ትር ይምረጡ:",
+            'title': "አንድ ትር ይምረጡ:",
             'profile': "መገለጫ",
             'profile_desc': "የእርስዎን ፍሪላንሰር መገለጫ እና CV ያስተዳድሩ",
             'applications': "ማመልከቻዎች",
@@ -504,7 +498,6 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             'about_desc': "ስለ HustleX መድረክ የበለጠ ይወቁ",
             'settings': "ቅንብሮች",
             'settings_desc': "የእርስዎን ምርጫዎች እና መለያ ያስተካክሉ",
-            'error': "❌ ስህተት: የድር መተግበሪያ URL አይደርስም። እባክዎ ቆይተው ይሞክሩ ወይም ድጋፍን ያግኙ።"
         }
     }
     
@@ -761,20 +754,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif action == 'profile':
-        job_id = get_pending_job_id(context)
-        profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?job_id={job_id}"
-        keyboard = [[InlineKeyboardButton("👤 Open Profile", web_app=WebAppInfo(url=profile_url))]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        keyboard = [[KeyboardButton("⬅️ Back to Menu")]]
         await update.effective_message.reply_text(
-            "👤 *Profile*\n\nClick the button below to open your profile setup:",
-            reply_markup=reply_markup,
+            "👤 *Profile*\n\nUse the menu below to access your profile options.",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
         )
     elif action == 'applications':
-        # Applications - send URL as clickable link
-        applications_url = "https://hustlexet.vercel.app/my-applications"
+        keyboard = [[KeyboardButton("⬅️ Back to Menu")]]
         await update.effective_message.reply_text(
-            f"📋 *Applications*\n\nClick here to access your applications: {applications_url}",
+            "📋 *Applications*\n\nUse the menu below to access your applications.",
+            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
             parse_mode="Markdown"
         )
     elif action == 'about':
@@ -2518,6 +2508,7 @@ def main():
         await application.bot.set_my_commands([
             BotCommand("start", "Main Menu"),
         ])
+        await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     
