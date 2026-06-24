@@ -762,17 +762,26 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
     elif action == 'profile':
-        keyboard = [[KeyboardButton("⬅️ Back to Menu")]]
+        job_id = get_pending_job_id(context)
+        profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?job_id={job_id}"
+        keyboard = [
+            [InlineKeyboardButton("👤 Open Profile", url=profile_url)],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu")]
+        ]
         await update.effective_message.reply_text(
-            "👤 *Profile*\n\nUse the menu below to access your profile options.",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            "👤 *Profile*\n\nClick below to open your profile setup:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
     elif action == 'applications':
-        keyboard = [[KeyboardButton("⬅️ Back to Menu")]]
+        applications_url = "https://hustlexet.vercel.app/my-applications"
+        keyboard = [
+            [InlineKeyboardButton("📋 Open Applications", url=applications_url)],
+            [InlineKeyboardButton("⬅️ Back to Menu", callback_data="menu")]
+        ]
         await update.effective_message.reply_text(
-            "📋 *Applications*\n\nUse the menu below to access your applications.",
-            reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True),
+            "📋 *Applications*\n\nClick below to view your applications:",
+            reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown"
         )
     elif action == 'about':
