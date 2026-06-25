@@ -2808,7 +2808,8 @@ async def handle_channel_profile_message(update: Update, context: ContextTypes.D
 def main():
     async def post_init(application):
         await application.bot.set_my_commands([
-            BotCommand("start", "Main Menu"),
+            BotCommand("start", "Start"),
+            BotCommand("menu", "Menu"),
         ])
         await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
@@ -2827,6 +2828,7 @@ def main():
 
     # Command handlers
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("menu", menu_callback))
     app.add_handler(CommandHandler("register_complete", register_complete))
 
     # Contact handler for phone number sharing
