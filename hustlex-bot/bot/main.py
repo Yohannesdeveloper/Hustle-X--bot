@@ -486,26 +486,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.error("Cannot send message due to invalid bot token")
         return
     
-    user_id = update.effective_user.id
-
     job_id = parse_job_id_from_start(context.args)
     if job_id:
         context.user_data["pending_job_id"] = job_id
 
-    if is_user_registered(user_id):
-        registered_users.add(user_id)
-        await route_registered_user(update, context)
-        return
-
-    # Fallback: check via API when MongoDB direct check fails
-    if await check_registration_via_api(user_id):
-        logger.info(f"User {user_id} confirmed registered via API fallback")
-        registered_users.add(user_id)
-        register_user(user_id, update.effective_user.username, update.effective_user.first_name)
-        await route_registered_user(update, context)
-        return
-
-    await show_registration_prompt(update, context)
+    await route_registered_user(update, context)
 
 # ---------------------------
 # Utility function for safe message editing
