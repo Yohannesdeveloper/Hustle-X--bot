@@ -379,6 +379,12 @@ async def require_registration(update: Update, context: ContextTypes.DEFAULT_TYP
     if is_user_registered(user_id):
         registered_users.add(user_id)
         return True
+    # Fallback: check via API when MongoDB check fails
+    if await check_registration_via_api(user_id):
+        logger.info(f"User {user_id} confirmed registered via API fallback")
+        registered_users.add(user_id)
+        register_user(user_id, update.effective_user.username, update.effective_user.first_name)
+        return True
     await show_registration_prompt(update, context)
     return False
 
