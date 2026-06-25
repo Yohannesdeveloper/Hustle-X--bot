@@ -445,7 +445,6 @@ async def send_job_details(update: Update, context: ContextTypes.DEFAULT_TYPE, j
 async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route a registered user directly to menu or job details."""
     user_id = update.effective_user.id
-    registered_users.add(user_id)
     job_id = parse_job_id_from_start(context.args) or context.user_data.get("pending_job_id")
     if job_id:
         context.user_data["pending_job_id"] = job_id
