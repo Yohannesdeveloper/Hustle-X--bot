@@ -513,6 +513,9 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=None, con
 # Menu callback
 # ---------------------------
 async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not await require_registration(update, context):
+        return
+
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     
@@ -895,7 +898,17 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Check if the text matches any menu item
     action = menu_texts.get(text)
 
+    protected_actions = {
+        'menu', 'profile', 'applications', 'about', 'settings',
+        'settings_languages', 'settings_account', 'settings_cv', 'settings_terms',
+        'account_view_profile', 'account_notifications', 'account_delete',
+        'cv_view', 'cv_upload', 'cv_remove', 'terms_privacy',
+    }
     if action is None:
+        return
+
+    if action in protected_actions and not is_user_registered(user_id):
+        await show_registration_prompt(update, context)
         return
     
     if action == 'menu':
