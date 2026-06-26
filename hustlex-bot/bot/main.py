@@ -689,9 +689,12 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                     await update.effective_chat.send_message(message, reply_markup=reply_markup)
             elif parsed_data.get('action') == 'profile_complete':
                 user_id = update.effective_user.id
-                job_id = parsed_data.get('job_id') or get_pending_job_id(context)
                 logger.info(f"Profile completed for user {user_id}")
-                await send_job_details(update, context, job_id)
+                await update.effective_chat.send_message(
+                    "✅ Profile Created Successfully! 🎉\n\n"
+                    "Your freelancer profile is now live. Clients can discover your skills and invite you to projects.\n\n"
+                    "Tap /start to access the main menu."
+                )
         except json.JSONDecodeError:
             pass
         except Exception as e:
