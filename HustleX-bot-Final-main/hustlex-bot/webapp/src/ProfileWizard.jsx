@@ -41,12 +41,14 @@ export default function ProfileWizard(){
         signal: AbortSignal.timeout(30000)
       });
       if (res.ok) {
-        // Store initData for authentication on job-listings page
         if (initData) {
           localStorage.setItem('telegram_init_data', initData);
         }
-        // Redirect to job-listings as logged-in user
-        window.location.href = 'https://hustlexet.vercel.app/job-listings';
+        if (window.Telegram?.WebApp) {
+          window.Telegram.WebApp.sendData(JSON.stringify({ action: 'profile_complete' }));
+        } else {
+          window.location.href = 'https://hustlexet.vercel.app/job-listings';
+        }
       } else {
         alert('Save failed');
       }
