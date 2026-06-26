@@ -418,7 +418,7 @@
         
           if (tg) {
             tg.sendData(JSON.stringify({ action: 'register_complete' }));
-            setTimeout(() => { tg.close(); }, 1200);
+            setTimeout(() => { tg.close(); }, 300);
           } else {
             alert('Registration completed successfully! Check the bot for next steps.');
             form.reset();

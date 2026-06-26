@@ -172,7 +172,7 @@
               action: 'profile_complete',
               job_id: jobId
             }));
-            window.location.href = `/job-details/${jobId}`;
+            setTimeout(() => { window.Telegram.WebApp.close(); }, 300);
           } else {
             window.location.href = `/job-details/${jobId}`;
           }
