@@ -684,8 +684,12 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
             elif parsed_data.get('action') == 'profile_complete':
                 user_id = update.effective_user.id
                 logger.info(f"Profile completed for user {user_id}")
+                registered_users.add(user_id)
                 context.user_data['_profile_just_completed'] = True
                 await menu_callback(update, context)
+                job_id = parsed_data.get('job_id') or get_pending_job_id(context)
+                if job_id:
+                    await send_job_details(update, context, job_id)
         except json.JSONDecodeError:
             pass
         except Exception as e:
@@ -2802,7 +2806,8 @@ async def handle_channel_profile_message(update: Update, context: ContextTypes.D
 def main():
     async def post_init(application):
         await application.bot.set_my_commands([
-            BotCommand("start", "Start"),
+            BotCommand("start", "Main menu"),
+            BotCommand("profile", "Manage your freelancer profile"),
         ])
         await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
 
@@ -2821,6 +2826,7 @@ def main():
 
     # Command handlers
     app.add_handler(CommandHandler("start", start))
+    app.add_handler(CommandHandler("profile", profile_cmd))
     app.add_handler(CommandHandler("register_complete", register_complete))
 
     # Contact handler for phone number sharing
