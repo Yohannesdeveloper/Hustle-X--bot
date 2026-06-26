@@ -30,7 +30,7 @@ export default function ProfileWizard(){
     fd.append('name', name);
     fd.append('age', age);
     fd.append('sex', sex);
-    fd.append('initData', initData);
+    fd.append('init_data', initData);
     if (cvFile) fd.append('cv', cvFile);
 
     try {
