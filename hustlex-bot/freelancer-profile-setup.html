@@ -168,11 +168,8 @@
           }
 
           if (window.Telegram && window.Telegram.WebApp) {
-            window.Telegram.WebApp.sendData(JSON.stringify({
-              action: 'profile_complete',
-              job_id: jobId
-            }));
-            setTimeout(() => { window.Telegram.WebApp.close(); }, 300);
+            const tg = window.Telegram.WebApp;
+            tg.sendData(JSON.stringify({ action: 'profile_complete' }));
           } else {
             window.location.href = `/job-details/${jobId}`;
           }

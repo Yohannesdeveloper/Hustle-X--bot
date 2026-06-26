@@ -145,6 +145,17 @@ async def save_profile(
             print(f"Profile saved and user {user_id} marked as registered")
         except Exception as e:
             print(f"Error saving to MongoDB: {e}")
+
+    if user_id:
+        await send_telegram_message(
+            user_id=user_id,
+            text=(
+                "✅ <b>Profile Published Successfully!</b>\n\n"
+                "Your freelancer profile is now live on HustleX! 🎉\n\n"
+                "Employers can now find and connect with you.\n"
+                "Use /menu to discover available opportunities."
+            )
+        )
     
     return {"status": "success", "message": "Profile saved successfully"}
 
@@ -231,6 +242,155 @@ async def serve_register_page():
     """Serve the registration form HTML for the Telegram Mini App."""
     html_path = Path(__file__).resolve().parent.parent / "register.html"
     return HTMLResponse(content=html_path.read_text(encoding="utf-8"), status_code=200)
+
+@app.post("/api/freelancer-profile")
+async def save_freelancer_profile(request: Request):
+    form = await request.form()
+    init_data = form.get("initData") or form.get("init_data")
+
+    if not init_data or not verify_init_data(init_data, BOT_TOKEN):
+        raise HTTPException(status_code=401, detail="Invalid initData")
+
+    params = dict(urllib.parse.parse_qsl(init_data, keep_blank_values=True))
+    user_str = params.get("user")
+    user_id = None
+    if user_str:
+        try:
+            user_data = json.loads(user_str)
+            user_id = user_data.get("id")
+        except Exception:
+            pass
+
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Missing user ID")
+
+    exp_count = int(form.get("exp_count", 0))
+    experience = []
+    for i in range(exp_count):
+        if form.get(f"exp_title_{i}"):
+            experience.append({
+                "title": form.get(f"exp_title_{i}"),
+                "company": form.get(f"exp_company_{i}"),
+                "start": form.get(f"exp_start_{i}"),
+                "end": form.get(f"exp_end_{i}"),
+                "desc": form.get(f"exp_desc_{i}")
+            })
+
+    edu_count = int(form.get("edu_count", 0))
+    education = []
+    for i in range(edu_count):
+        if form.get(f"edu_degree_{i}"):
+            education.append({
+                "degree": form.get(f"edu_degree_{i}"),
+                "school": form.get(f"edu_school_{i}"),
+                "start": form.get(f"edu_start_{i}"),
+                "end": form.get(f"edu_end_{i}")
+            })
+
+    port_count = int(form.get("port_count", 0))
+    portfolio = []
+    for i in range(port_count):
+        if form.get(f"port_title_{i}"):
+            portfolio.append({
+                "title": form.get(f"port_title_{i}"),
+                "desc": form.get(f"port_desc_{i}"),
+                "link": form.get(f"port_link_{i}")
+            })
+
+    cert_count = int(form.get("cert_count", 0))
+    certifications = []
+    for i in range(cert_count):
+        if form.get(f"cert_name_{i}"):
+            certifications.append({
+                "name": form.get(f"cert_name_{i}"),
+                "org": form.get(f"cert_org_{i}"),
+                "url": form.get(f"cert_url_{i}")
+            })
+
+    profile_pic = form.get("profile_pic")
+    pic_path = None
+    if profile_pic and hasattr(profile_pic, "filename") and profile_pic.filename:
+        pic_path = f"uploads/profile_pics/{user_id}_{profile_pic.filename}"
+        os.makedirs(os.path.dirname(pic_path), exist_ok=True)
+        content = await profile_pic.read()
+        async with aiofiles.open(pic_path, "wb") as f:
+            await f.write(content)
+
+    cover_img = form.get("cover_img")
+    cover_path = None
+    if cover_img and hasattr(cover_img, "filename") and cover_img.filename:
+        cover_path = f"uploads/covers/{user_id}_{cover_img.filename}"
+        os.makedirs(os.path.dirname(cover_path), exist_ok=True)
+        content = await cover_img.read()
+        async with aiofiles.open(cover_path, "wb") as f:
+            await f.write(content)
+
+    profile_data = {
+        "user_id": user_id,
+        "full_name": form.get("full_name"),
+        "username": form.get("username"),
+        "email": form.get("email"),
+        "phone": form.get("phone"),
+        "country": form.get("country"),
+        "timezone": form.get("timezone"),
+        "languages": [l.strip() for l in form.get("languages", "").split(",") if l.strip()],
+        "intro_video_url": form.get("intro_video_url"),
+        "headline": form.get("headline"),
+        "short_bio": form.get("short_bio"),
+        "long_bio": form.get("long_bio"),
+        "philosophy": form.get("philosophy"),
+        "primary_skills": [s.strip() for s in form.get("primary_skills", "").split(",") if s.strip()],
+        "secondary_skills": [s.strip() for s in form.get("secondary_skills", "").split(",") if s.strip()],
+        "tools": form.get("tools"),
+        "experience": experience,
+        "education": education,
+        "portfolio": portfolio,
+        "certifications": certifications,
+        "availability": form.get("availability"),
+        "weekly_hours": form.get("weekly_hours"),
+        "work_type": form.get("work_type"),
+        "social": {
+            "github": form.get("github_url"),
+            "linkedin": form.get("linkedin_url"),
+            "portfolio": form.get("portfolio_url")
+        },
+        "settings": {
+            "visibility": form.get("profile_visibility"),
+            "featured_applied": form.get("featured_profile") == "on"
+        },
+        "profile_setup_complete": True,
+        "updated_at": datetime.utcnow()
+    }
+
+    if pic_path:
+        profile_data["profile_pic_path"] = pic_path
+    if cover_path:
+        profile_data["cover_img_path"] = cover_path
+
+    database = get_mongodb_connection()
+    if database:
+        try:
+            database.freelancer_profiles.update_one(
+                {"user_id": user_id},
+                {"$set": profile_data},
+                upsert=True
+            )
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+    else:
+        raise HTTPException(status_code=500, detail="Could not connect to database")
+
+    await send_telegram_message(
+        user_id=user_id,
+        text=(
+            "✅ <b>Profile Published Successfully!</b>\n\n"
+            "Your freelancer profile is now live on HustleX! 🎉\n\n"
+            "Employers can now find and connect with you.\n"
+            "Use /menu to discover available opportunities."
+        )
+    )
+
+    return {"status": "success", "message": "Profile created"}
 
 # ── Send Telegram message helper ──────────────────────────────────
 async def send_telegram_message(chat_id: int, text: str):

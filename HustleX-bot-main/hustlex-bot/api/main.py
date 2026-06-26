@@ -321,6 +321,16 @@ async def save_freelancer_profile(request: Request):
     else:
         raise HTTPException(status_code=500, detail="Could not connect to database")
 
+    await send_telegram_message(
+        user_id=user_id,
+        text=(
+            "✅ <b>Profile Published Successfully!</b>\n\n"
+            "Your freelancer profile is now live on HustleX! 🎉\n\n"
+            "Employers can now find and connect with you.\n"
+            "Use /menu to discover available opportunities."
+        )
+    )
+
     return {"status": "success", "message": "Profile created"}
 
 # ── Vercel ASGI handler ───────────────────────────────────────────
