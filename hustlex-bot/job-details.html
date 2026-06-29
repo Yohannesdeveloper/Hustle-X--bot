@@ -25,6 +25,11 @@
     .label { font-size: 12px; color: #94a3b8; text-transform: uppercase; letter-spacing: 0.04em; }
     .value { font-size: 16px; margin-top: 4px; }
     .loading, .error { text-align: center; padding: 24px; color: #94a3b8; }
+    .loading { animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
     button {
       width: 100%;
       margin-top: 20px;
@@ -59,6 +64,7 @@
     const JOB_ID = pathParts[pathParts.length - 1] || '6a31521bf3edf7daab32416c';
     const tg = window.Telegram?.WebApp;
     
+    // Always expand Telegram WebApp if available
     if (tg) {
       tg.expand();
     }
@@ -106,34 +112,32 @@
       } catch (err) {
         console.error('Error loading job:', err);
         document.getElementById('loading').style.display = 'none';
+        
+        // Show fallback content even on error to prevent stuck screen
+        document.getElementById('content').style.display = 'block';
+        document.getElementById('jobTitle').textContent = 'Job Opportunity';
+        document.getElementById('jobType').textContent = 'Remote';
+        document.getElementById('jobLocation').textContent = 'Remote';
+        document.getElementById('jobSalary').textContent = 'Negotiable';
+        document.getElementById('jobDeadline').textContent = 'Open';
+        document.getElementById('jobCompany').textContent = 'HustleX Partner';
+        document.getElementById('jobDescription').textContent = 'Job details are currently unavailable. Please try again later or contact support.';
+        
         const errEl = document.getElementById('error');
         errEl.style.display = 'block';
         
         if (err.name === 'AbortError') {
-          errEl.textContent = 'Request timed out. Please check your connection and try again.';
+          errEl.textContent = 'Request timed out. Showing fallback job information.';
         } else {
-          errEl.textContent = err.message || 'Failed to load job details. Please try again later.';
+          errEl.textContent = 'Could not load job details. Showing fallback information.';
         }
       }
     }
 
-    // Check if user is authenticated via Telegram
-    if (tg && tg.initData) {
-      const user = tg.initDataUnsafe?.user;
-      if (user) {
-        console.log('User authenticated:', user.id, user.first_name);
-        loadJob();
-      } else {
-        console.log('No user data in Telegram init data');
-        document.getElementById('loading').style.display = 'none';
-        document.getElementById('error').style.display = 'block';
-        document.getElementById('error').textContent = 'Please open this page from the Telegram bot to view job details.';
-      }
-    } else {
-      console.log('Not running in Telegram WebApp or no init data');
-      // Still try to load job for testing purposes
-      loadJob();
-    }
+    // Always attempt to load job regardless of authentication state
+    // This ensures the page doesn't get stuck on loading spinner
+    console.log('Attempting to load job...');
+    loadJob();
   </script>
 </body>
 </html>
