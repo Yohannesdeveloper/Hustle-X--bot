@@ -3,14 +3,20 @@
 JOB_TITLE, JOB_TYPE, WORK_LOCATION, SALARY, DEADLINE, DESCRIPTION, CLIENT_TYPE, JOB_LINK, COMPANY_NAME, VERIFIED, PREVIOUS_JOBS = range(11)
 import os
 import re
+import random
 import logging
 import json
+import hmac
+import hashlib
+import base64
+import asyncio
 from datetime import datetime
 from typing import Optional
 from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, MenuButtonCommands
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, ChatMemberHandler
 from telegram.error import TelegramError
+from urllib.parse import urlparse
 import aiohttp
 import io
 from pymongo import MongoClient
@@ -36,6 +42,15 @@ DB_NAME = "hustlex"
 DEFAULT_JOB_ID = "6a31521bf3edf7daab32416c"
 BOT_USERNAME = os.getenv("BOT_USERNAME", "HustleXet_bot")
 
+# Escape legacy Telegram Markdown characters
+def escape_markdown(text) -> str:
+    if text is None:
+        return ""
+    text_str = str(text)
+    for char in ['_', '*', '`', '[']:
+        text_str = text_str.replace(char, f"\\{char}")
+    return text_str
+
 def get_db():
     """Return MongoDB database handle."""
     global mongo_client, db
@@ -56,34 +71,43 @@ def get_db():
         logger.error(f"Failed to connect to MongoDB: {e}")
         return None
 
-def is_user_registered(user_id: int) -> bool:
-    """Check if user completed registration in MongoDB."""
+def is_user_registered(user_id: int):
+    """Check if user completed registration in MongoDB. Returns True/False, or None on error."""
     database = get_db()
     if database is None:
         logger.warning(f"is_user_registered({user_id}): get_db() returned None")
-        return False
+        return None
     try:
-        user = database.registered_users.find_one({"user_id": user_id})
-        if user is not None:
+        if database.registered_users.find_one({"user_id": user_id}):
             return True
-        logger.info(f"is_user_registered({user_id}): not found in MongoDB")
+        if database.profiles.find_one({"user_id": user_id}):
+            return True
+        if database.freelancer_profiles.find_one({"user_id": user_id}):
+            return True
+        logger.info(f"is_user_registered({user_id}): not found in any MongoDB collection")
         return False
     except Exception as e:
         logger.error(f"Error checking user registration for {user_id}: {e}")
-        return False
+        return None
 
-async def check_registration_via_api(user_id: int) -> bool:
-    """Fallback: check registration via the API (Vercel) when direct MongoDB check fails."""
+async def check_registration_via_api(user_id: int):
+    """Check registration via API. Returns True/False, or None on error."""
     url = f"{WEBAPP_URL.rstrip('/')}/api/user/status?user_id={user_id}"
     try:
         async with aiohttp.ClientSession() as session:
-            async with session.get(url, timeout=5) as resp:
+            async with session.get(url, timeout=10) as resp:
+                body = await resp.text()
+                logger.info(f"API /api/user/status for {user_id}: status={resp.status}, body={body}")
                 if resp.status == 200:
-                    data = await resp.json()
-                    return data.get("registered", False)
+                    try:
+                        data = json.loads(body)
+                        return data.get("registered", False)
+                    except Exception:
+                        return None
+                return None
     except Exception as e:
         logger.error(f"API registration check failed for {user_id}: {e}")
-    return False
+    return None
 
 def get_user_profile(user_id: int):
     database = get_db()
@@ -99,7 +123,7 @@ def has_user_phone(user_id: int) -> bool:
     profile = get_user_profile(user_id)
     if not profile:
         return False
-    return bool(profile.get("phone") or profile.get("phone_number"))
+    return bool(profile.get("phone") or profile.get("phone_number") or profile.get("contact_info"))
 
 def save_user_phone(user_id: int, phone: str) -> bool:
     database = get_db()
@@ -121,6 +145,45 @@ def is_profile_setup_complete(user_id: int) -> bool:
     if not profile:
         return False
     return bool(profile.get("name") and profile.get("age") and profile.get("sex"))
+
+def save_registration_prompt_msg(user_id: int, message_id: int, chat_id: int):
+    database = get_db()
+    if database is None:
+        return
+    try:
+        database.profiles.update_one(
+            {"user_id": user_id},
+            {"$set": {"registration_message_id": message_id, "registration_chat_id": chat_id}},
+            upsert=True
+        )
+        logger.info(f"Saved registration message {message_id} for user {user_id} in DB")
+    except Exception as e:
+        logger.error(f"Error saving registration prompt msg for {user_id}: {e}")
+
+def get_registration_prompt_msg(user_id: int):
+    database = get_db()
+    if database is None:
+        return None, None
+    try:
+        profile = database.profiles.find_one({"user_id": user_id}, {"registration_message_id": 1, "registration_chat_id": 1})
+        if profile:
+            return profile.get("registration_message_id"), profile.get("registration_chat_id")
+    except Exception as e:
+        logger.error(f"Error getting registration prompt msg for {user_id}: {e}")
+    return None, None
+
+def clear_registration_prompt_msg(user_id: int):
+    database = get_db()
+    if database is None:
+        return
+    try:
+        database.profiles.update_one(
+            {"user_id": user_id},
+            {"$unset": {"registration_message_id": "", "registration_chat_id": ""}}
+        )
+        logger.info(f"Cleared registration message mapping for user {user_id} in DB")
+    except Exception as e:
+        logger.error(f"Error clearing registration prompt msg for {user_id}: {e}")
 
 def parse_job_id_from_start(args) -> Optional[str]:
     if not args:
@@ -158,14 +221,17 @@ def register_user(user_id: int, username: str = None, first_name: str = None) ->
         logger.error(f"Error registering user: {e}")
         return False
 
-def get_user_cv(user_id: int):
+def get_user_cv(user_id: int, include_binary: bool = True):
     database = get_db()
     if database is None:
         return None
     try:
+        projection = {"cv_filename": 1, "cv_mime_type": 1, "cv_file_size": 1, "cv_upload_date": 1, "cv_file_id": 1}
+        if include_binary:
+            projection["cv_file_data"] = 1
         profile = database.profiles.find_one(
             {"user_id": user_id},
-            {"cv_file_data": 1, "cv_filename": 1, "cv_mime_type": 1}
+            projection
         )
         return profile
     except Exception as e:
@@ -344,49 +410,87 @@ def escape_markdown_v2(text: str) -> str:
 
 async def show_registration_prompt(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Show registration WebApp for unregistered users."""
+    import random
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     welcome_messages = {
         'en': {
             'welcome': (
                 "👋 *Welcome to HustleX!* 🚀\n\n"
-                "You stand at the gates of the **premier freelance kingdom** — where top 1% talent "
-                "meets world-class opportunities. But first, you need your **welcome papers**.\n\n"
-                "Registration takes **60 seconds** and unlocks:\n"
+                "You stand at the gates of the *premier freelance kingdom* — where top 1% talent "
+                "meets world-class opportunities. But first, you need your *welcome papers*.\n\n"
+                "Registration takes *60 seconds* and unlocks:\n"
                 "• 🎯 *Your Profile Throne* — Let clients discover your genius\n"
                 "• 📋 *Application Command Center* — Track every conquest\n"
                 "• ⚡ *Instant Apply* — One tap to your next big gig\n"
                 "• 🌟 *Verified Status* — Flex on the competition\n\n"
-                "This isn't just a sign-up — it's your **origin story**. 🦸\n\n"
+                "This isn't just a sign-up — it's your *origin story*. 🦸\n\n"
                 "👇 Tap below to begin your legend 👇"
             ),
             'register': "📝 Register Now — Join the Elite",
         },
     }
     messages = welcome_messages.get(lang_code, welcome_messages['en'])
-    register_url = f"{WEBAPP_URL.rstrip('/')}/Register"
+    cache_buster = random.randint(100000, 999999)
+    register_url = f"{WEBAPP_URL.rstrip('/')}/Register?cb={cache_buster}"
     keyboard = [[InlineKeyboardButton(messages['register'], web_app=WebAppInfo(url=register_url))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
+    
+    sent_message = None
     if update.effective_message:
-        await update.effective_message.reply_text(messages['welcome'], reply_markup=reply_markup)
+        sent_message = await update.effective_message.reply_text(
+            messages['welcome'],
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
     else:
-        await update.effective_chat.send_message(messages['welcome'], reply_markup=reply_markup)
+        sent_message = await update.effective_chat.send_message(
+            messages['welcome'],
+            reply_markup=reply_markup,
+            parse_mode="Markdown"
+        )
+
+    if sent_message:
+        context.user_data["registration_message_id"] = sent_message.message_id
+        context.user_data["registration_chat_id"] = sent_message.chat.id
+        save_registration_prompt_msg(user_id, sent_message.message_id, sent_message.chat.id)
 
 async def require_registration(update: Update, context: ContextTypes.DEFAULT_TYPE) -> bool:
+    """Check registration. Only blocks if BOTH checks definitively say False."""
     user_id = update.effective_user.id
-    # Check in-memory set first (fastest, survives message interception)
     if user_id in registered_users:
         return True
-    if is_user_registered(user_id):
-        registered_users.add(user_id)
-        return True
-    if await check_registration_via_api(user_id):
-        logger.info(f"User {user_id} confirmed registered via API fallback")
+    
+    db_result = is_user_registered(user_id)
+    api_result = await check_registration_via_api(user_id)
+    
+    if db_result is True or api_result is True:
         registered_users.add(user_id)
         register_user(user_id, update.effective_user.username, update.effective_user.first_name)
+        
+        # Delete registration prompt if it exists
+        msg_id, chat_id = get_registration_prompt_msg(user_id)
+        if not msg_id or not chat_id:
+            msg_id = context.user_data.get("registration_message_id")
+            chat_id = context.user_data.get("registration_chat_id")
+        if msg_id and chat_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                logger.info(f"Deleted registration message {msg_id} for user {user_id} in require_registration")
+            except Exception as e:
+                logger.warning(f"Could not delete registration message: {e}")
+            clear_registration_prompt_msg(user_id)
+            context.user_data.pop("registration_message_id", None)
+            context.user_data.pop("registration_chat_id", None)
+
         return True
-    await show_registration_prompt(update, context)
-    return False
+    elif db_result is False or api_result is False:
+        logger.warning(f"User {user_id} NOT registered (API={api_result}, DB={db_result})")
+        await show_registration_prompt(update, context)
+        return False
+    else:
+        logger.info(f"User {user_id}: check errored, assuming registered")
+        return True
 
 async def prompt_phone_share(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -410,10 +514,15 @@ async def prompt_phone_share(update: Update, context: ContextTypes.DEFAULT_TYPE)
             await chat.send_message(message, reply_markup=reply_markup)
 
 async def prompt_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import random
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     job_id = get_pending_job_id(context)
-    profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?job_id={job_id}"
+    start_arg = context.user_data.get("start_arg", "")
+    cache_buster = random.randint(100000, 999999)
+    profile_url = f"{WEBAPP_URL.rstrip('/')}/freelancer-profile-setup?cb={cache_buster}&job_id={job_id}"
+    if start_arg:
+        profile_url += f"&start={start_arg}"
     keyboard = [[InlineKeyboardButton("📝 Complete Profile Setup", web_app=WebAppInfo(url=profile_url))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     messages = {
@@ -426,28 +535,48 @@ async def prompt_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYP
     else:
         await chat.send_message(message, reply_markup=reply_markup)
 
-async def send_job_details(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str = None):
-    job_id = job_id or get_pending_job_id(context)
-    job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
-    keyboard = [[InlineKeyboardButton("💼 Open Job Details", web_app=WebAppInfo(url=job_details_url))]]
-    reply_markup = InlineKeyboardMarkup(keyboard)
-    msg = "🎉 Welcome back! Tap below to view the job and apply:"
-    if update.effective_message:
-        await update.effective_message.reply_text(msg, reply_markup=reply_markup)
-    else:
-        await update.effective_chat.send_message(msg, reply_markup=reply_markup)
-
 async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Route a registered user directly to menu or job details."""
+    """Check registration and route user. Infrastructure errors => show menu, don't block."""
     user_id = update.effective_user.id
     job_id = parse_job_id_from_start(context.args) or context.user_data.get("pending_job_id")
     if job_id:
         context.user_data["pending_job_id"] = job_id
+    
+    registered = user_id in registered_users
+    if not registered:
+        db_result = is_user_registered(user_id)
+        api_result = await check_registration_via_api(user_id)
+        
+        if db_result is True or api_result is True:
+            registered = True
+        elif db_result is False or api_result is False:
+            await show_registration_prompt(update, context)
+            return
+        else:
+            # Both returned None (infrastructure error)
+            registered = True
+            
+    if registered:
+        registered_users.add(user_id)
+        register_user(user_id, update.effective_user.username, update.effective_user.first_name)
+        
+        # Delete registration prompt if it exists
+        msg_id, chat_id = get_registration_prompt_msg(user_id)
+        if not msg_id or not chat_id:
+            msg_id = context.user_data.get("registration_message_id")
+            chat_id = context.user_data.get("registration_chat_id")
+        if msg_id and chat_id:
+            try:
+                await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                logger.info(f"Deleted registration message {msg_id} for user {user_id} in route_registered_user")
+            except Exception as e:
+                logger.warning(f"Could not delete registration message: {e}")
+            clear_registration_prompt_msg(user_id)
+            context.user_data.pop("registration_message_id", None)
+            context.user_data.pop("registration_chat_id", None)
 
-    if job_id:
-        await send_job_details(update, context, job_id)
-    else:
-        await menu_callback(update, context)
+        chat_id = update.effective_chat.id if update.effective_chat else user_id
+        await send_main_menu_to_user(context.bot, user_id, chat_id=chat_id)
 
 # ---------------------------
 # /register_complete command
@@ -455,6 +584,7 @@ async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TY
 async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mark user as registered after completing registration on the website"""
     user_id = update.effective_user.id
+
     username = update.effective_user.username
     first_name = update.effective_user.first_name
     success = register_user(user_id, username, first_name)
@@ -468,14 +598,25 @@ async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     registered_users.add(user_id)
-    await post_registration_to_channel(context, user_id, username or "")
 
-    if not has_user_phone(user_id):
-        await prompt_phone_share(update, context)
-    elif not is_profile_setup_complete(user_id):
-        await prompt_profile_setup(update, context)
-    else:
-        await send_job_details(update, context)
+    # Delete registration prompt if it exists
+    msg_id, chat_id = get_registration_prompt_msg(user_id)
+    if not msg_id or not chat_id:
+        msg_id = context.user_data.get("registration_message_id")
+        chat_id = context.user_data.get("registration_chat_id")
+    if msg_id and chat_id:
+        try:
+            await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+            logger.info(f"Deleted registration message {msg_id} for user {user_id} in register_complete")
+        except Exception as e:
+            logger.warning(f"Could not delete registration message for user {user_id}: {e}")
+        clear_registration_prompt_msg(user_id)
+        context.user_data.pop("registration_message_id", None)
+        context.user_data.pop("registration_chat_id", None)
+
+    await post_registration_to_channel(context, user_id, username or "")
+    chat_id = update.effective_chat.id if update.effective_chat else user_id
+    await send_main_menu_to_user(context.bot, user_id, chat_id=chat_id)
 
 # ---------------------------
 # /start command
@@ -486,30 +627,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_chat.send_message("❌ Error: Invalid bot token. Please contact the bot administrator.")
         logger.error("Cannot send message due to invalid bot token")
         return
-
+    
     job_id = parse_job_id_from_start(context.args)
     if job_id:
         context.user_data["pending_job_id"] = job_id
+    # Store the raw start argument for deep-link preservation through registration
+    if context.args:
+        context.user_data["start_arg"] = context.args[0]
 
-    user_id = update.effective_user.id
-    registered = user_id in registered_users or is_user_registered(user_id)
-
-    if not registered:
-        # Unregistered: show registration mini app
-        await show_registration_prompt(update, context)
-        return
-
-    # Registered: check phone
-    if not has_user_phone(user_id):
-        await prompt_phone_share(update, context)
-        return
-
-    # Phone present: check profile
-    if not is_profile_setup_complete(user_id):
-        await prompt_profile_setup(update, context)
-        return
-
-    # Fully set up: show job details or menu
     await route_registered_user(update, context)
 
 # ---------------------------
@@ -522,125 +647,107 @@ async def safe_edit_message(query, text, reply_markup=None, parse_mode=None, con
     except Exception:
         # If editing fails, send a new message instead
         if context:
-            await context.bot.send_message(
-                chat_id=query.message.chat.id,
-                text=text,
-                reply_markup=reply_markup,
-                parse_mode=parse_mode
-        )
+            try:
+                await context.bot.send_message(
+                    chat_id=query.message.chat.id,
+                    text=text,
+                    reply_markup=reply_markup,
+                    parse_mode=parse_mode
+                )
+            except Exception:
+                pass
 
-# ---------------------------
-# Menu callback
-# ---------------------------
-async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await require_registration(update, context):
-        return
-
-    user_id = update.effective_user.id
-    lang_code = user_languages.get(user_id, 'en')
-    
-    # Language-specific menu messages
-    menu_messages = {
-        'en': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nChoose a tab:",
-            'profile': "Profile",
-            'profile_desc': "Manage your freelancer profile and CV",
-            'applications': "Applications",
-            'applications_desc': "View and manage your job applications",
-            'about': "About HustleX",
-            'about_desc': "Learn more about HustleX platform",
-            'settings': "Settings",
-            'settings_desc': "Configure your preferences and account",
-            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
-        },
-        'es': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nElige una pestaña:",
-            'profile': "Perfil",
-            'profile_desc': "Gestiona tu perfil de freelancer y CV",
-            'applications': "Aplicaciones",
-            'applications_desc': "Ver y gestionar tus solicitudes de empleo",
-            'about': "Acerca de HustleX",
-            'about_desc': "Conoce más sobre la plataforma HustleX",
-            'settings': "Configuración",
-            'settings_desc': "Configura tus preferencias y cuenta",
-            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
-        },
-        'fr': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nChoisissez un onglet:",
-            'profile': "Profil",
-            'profile_desc': "Gérez votre profil de freelance et CV",
-            'applications': "Candidatures",
-            'applications_desc': "Voir et gérer vos candidatures",
-            'about': "À propos de HustleX",
-            'about_desc': "En savoir plus sur la plateforme HustleX",
-            'settings': "Paramètres",
-            'settings_desc': "Configurez vos préférences et compte",
-            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
-        },
-        'de': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nWählen Sie einen Tab:",
-            'profile': "Profil",
-            'profile_desc': "Verwalten Sie Ihr Freelancer-Profil und CV",
-            'applications': "Bewerbungen",
-            'applications_desc': "Bewerbungen anzeigen und verwalten",
-            'about': "Über HustleX",
-            'about_desc': "Erfahren Sie mehr über die HustleX-Plattform",
-            'settings': "Einstellungen",
-            'settings_desc': "Konfigurieren Sie Ihre Präferenzen und Konto",
-            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
-        },
-        'it': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nScegli una scheda:",
-            'profile': "Profilo",
-            'profile_desc': "Gestisci il tuo profilo freelance e CV",
-            'applications': "Candidature",
-            'applications_desc': "Visualizza e gestisci le tue candidature",
-            'about': "Informazioni su HustleX",
-            'about_desc': "Scopri di più sulla piattaforma HustleX",
-            'settings': "Impostazioni",
-            'settings_desc': "Configura le tue preferenze e account",
-            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
-        },
-        'pt': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nEscolha uma aba:",
-            'profile': "Perfil",
-            'profile_desc': "Gerencie seu perfil de freelancer e CV",
-            'applications': "Candidaturas",
-            'applications_desc': "Visualize e gerencie suas candidaturas",
-            'about': "Sobre o HustleX",
-            'about_desc': "Saiba mais sobre a plataforma HustleX",
-            'settings': "Configurações",
-            'settings_desc': "Configure suas preferências e conta",
-            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
-        },
-        'am': {
-            'title': "🌐 https://hustlexet.vercel.app/\n\nአንድ ትር ይምረጡ:",
-            'profile': "መገለጫ",
-            'profile_desc': "የእርስዎን ፍሪላንሰር መገለጫ እና CV ያስተዳድሩ",
-            'applications': "ማመልከቻዎች",
-            'applications_desc': "የስራ መጠየቅዎችን ይመልከቱ እና ያስተዳድሩ",
-            'about': "ስለ HustleX",
-            'about_desc': "ስለ HustleX መድረክ የበለጠ ይወቁ",
-            'settings': "ቅንብሮች",
-            'settings_desc': "የእርስዎን ምርጫዎች እና መለያ ያስተካክሉ",
-            'footer': "HustleX (https://hustlexet.vercel.app/)\nHustleX — Hire Elite Freelancers Worldwide\nConnect with top 1% freelancers in web development, MERN stack, UI/UX design & AI services. The premium marketplace for excellence.",
-        }
+MAIN_MENU_MESSAGES = {
+    'en': {
+        'title': "🌐 https://hustlexet.vercel.app/\n\nChoose a tab:",
+        'profile': "Profile",
+        'profile_desc': "Manage your freelancer profile and CV",
+        'applications': "Applications",
+        'applications_desc': "View and manage your job applications",
+        'about': "About HustleX",
+        'about_desc': "Learn more about HustleX platform",
+        'settings': "Settings",
+        'settings_desc': "Configure your preferences and account",
+    },
+    'es': {
+        'title': "🌐 https://hustlexet.vercel.app/\n\nElige una pestaña:",
+        'profile': "Perfil",
+        'profile_desc': "Gestiona tu perfil de freelancer y CV",
+        'applications': "Aplicaciones",
+        'applications_desc': "Ver y gestionar tus solicitudes de empleo",
+        'about': "Acerca de HustleX",
+        'about_desc': "Conoce más sobre la plataforma HustleX",
+        'settings': "Configuración",
+        'settings_desc': "Configura tus preferencias y cuenta",
+    },
+    'fr': {
+        'title': "🌐 https://hustlexet.vercel.app/\n\nChoisissez un onglet:",
+        'profile': "Profil",
+        'profile_desc': "Gérez votre profil de freelance et CV",
+        'applications': "Candidatures",
+        'applications_desc': "Voir et gérer vos candidatures",
+        'about': "À propos de HustleX",
+        'about_desc': "En savoir plus sur la plateforme HustleX",
+        'settings': "Paramètres",
+        'settings_desc': "Configurez vos préférences et compte",
+    },
+    'de': {
+        'title': "🌐 https://hustlexet.vercel.app/\n\nWählen Sie einen Tab:",
+        'profile': "Profil",
+        'profile_desc': "Verwalten Sie Ihr Freelancer-Profil und CV",
+        'applications': "Bewerbungen",
+        'applications_desc': "Bewerbungen anzeigen und verwalten",
+        'about': "Über HustleX",
+        'about_desc': "Erfahren Sie mehr über die HustleX-Plattform",
+        'settings': "Einstellungen",
+        'settings_desc': "Konfigurieren Sie Ihre Präferenzen und Konto",
+    },
+    'it': {
+        'title': "🌐 https://hustlexet.vercel.app/\n\nScegli una scheda:",
+        'profile': "Profilo",
+        'profile_desc': "Gestisci il tuo profilo freelance e CV",
+        'applications': "Candidature",
+        'applications_desc': "Visualizza e gestisci le tue candidature",
+        'about': "Informazioni su HustleX",
+        'about_desc': "Scopri di più sulla piattaforma HustleX",
+        'settings': "Impostazioni",
+        'settings_desc': "Configura le tue preferenze e account",
+    },
+    'pt': {
+        'title': "🌐 https://hustlexet.vercel.app/\n\nEscolha uma aba:",
+        'profile': "Perfil",
+        'profile_desc': "Gerencie seu perfil de freelancer e CV",
+        'applications': "Candidaturas",
+        'applications_desc': "Visualize e gerencie suas candidaturas",
+        'about': "Sobre o HustleX",
+        'about_desc': "Saiba mais sobre a plataforma HustleX",
+        'settings': "Configurações",
+        'settings_desc': "Configure suas preferências e conta",
+    },
+    'am': {
+        'title': "🌐 https://hustlexet.vercel.app/\n\nአንድ ትር ይምረጡ:",
+        'profile': "መገለጫ",
+        'profile_desc': "የእርስዎን ፍሪላንሰር መገለጫ እና CV ያስተዳድሩ",
+        'applications': "ማመልከቻዎች",
+        'applications_desc': "የስራ መጠየቅዎችን ይመልከቱ እና ያስተዳድሩ",
+        'about': "ስለ HustleX",
+        'about_desc': "ስለ HustleX መድረክ የበለጠ ይወቁ",
+        'settings': "ቅንብሮች",
+        'settings_desc': "የእርስዎን ምርጫዎች እና መለያ ያስተካክሉ",
     }
-    
-    messages = menu_messages.get(lang_code, menu_messages['en'])
-    
-    # Build menu with attached keyboard
+}
+
+async def send_main_menu_to_user(bot, user_id, chat_id=None, profile_just_completed=False, user_first_name=""):
+    lang_code = user_languages.get(user_id, 'en')
+    messages = MAIN_MENU_MESSAGES.get(lang_code, MAIN_MENU_MESSAGES['en'])
+
     keyboard = [
-        [KeyboardButton(f"ℹ️ {messages['about']}"), KeyboardButton(f"👤 {messages['profile']}")],
-        [KeyboardButton(f"📋 {messages['applications']}"), KeyboardButton(f"⚙️ {messages['settings']}")]
+        [KeyboardButton(f"📋 {messages['applications']}"), KeyboardButton(f"👤 {messages['profile']}")],
+        [KeyboardButton(f"⚙️ {messages['settings']}"), KeyboardButton(f"ℹ️ {messages['about']}")]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    
-    # Build menu message
+
     menu_text = ""
-    if context.user_data.pop('_profile_just_completed', False):
-        menu_text += "✅ *Profile Created Successfully!* 🎉\n"
-        menu_text += "Your freelancer profile is now live. Clients can discover your skills and invite you to projects.\n\n---\n\n"
     menu_text += f"{messages['title']}\n\n"
     menu_text += "🔥 *Welcome to the Arena, Champion!* 🔥\n\n"
     menu_text += "You're now in the *HustleX command center* — where freelancers become legends "\
@@ -650,13 +757,139 @@ async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     menu_text += f"👤 {messages['profile']} — Your digital throne, flex your empire\n"
     menu_text += f"⚙️ {messages['settings']} — Calibrate your battlefield\n"
     menu_text += f"ℹ️ {messages['about']} — Know the kingdom you're building in\n\n"
-    menu_text += "Let's make moves. 🚀\n\n"
-    menu_text += messages['footer']
-    
-    if update.effective_message:
-        await update.effective_message.reply_text(menu_text, reply_markup=reply_markup)
-    else:
-        await update.effective_chat.send_message(menu_text, reply_markup=reply_markup)
+    menu_text += "Let's make moves. 🚀"
+
+    await bot.send_message(chat_id=chat_id or user_id, text=menu_text, reply_markup=reply_markup, parse_mode="Markdown")
+
+# ---------------------------
+# Menu callback
+# ---------------------------
+async def menu_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    if not await require_registration(update, context):
+        return
+    first_name = update.effective_user.first_name or ""
+    profile_just_completed = context.user_data.pop('_profile_just_completed', False)
+    chat_id = update.effective_chat.id if update.effective_chat else user_id
+    await send_main_menu_to_user(context.bot, user_id, chat_id=chat_id, profile_just_completed=profile_just_completed, user_first_name=first_name)
+
+# ---------------------------
+# Registration callback poller (from API via MongoDB)
+# ---------------------------
+def verify_registration_callback(payload: dict) -> bool:
+    REGISTRATION_SECRET = os.environ.get("REGISTRATION_SECRET") or TOKEN or ""
+    sig = payload.pop("signature", "")
+    if not sig:
+        return False
+    payload_str = json.dumps(payload, separators=(",", ":"), sort_keys=True)
+    expected = hmac.new(REGISTRATION_SECRET.encode(), payload_str.encode(), hashlib.sha256).hexdigest()
+    return hmac.compare_digest(expected, sig)
+
+async def check_registration_callbacks(app):
+    bot = app.bot
+    database = get_db()
+    if database is None:
+        return
+    try:
+        unprocessed = list(database.registration_callbacks.find(
+            {"status": "SUCCESS", "processed": False}
+        ).limit(10))
+    except Exception:
+        return
+
+    for doc in unprocessed:
+        user_id = doc.get("user_id")
+        if not user_id:
+            continue
+
+        # Idempotency: atomically mark as processed
+        try:
+            result = database.registration_callbacks.update_one(
+                {"_id": doc["_id"], "processed": False},
+                {"$set": {"processed": True, "processed_at": datetime.utcnow()}}
+            )
+            if result.modified_count == 0:
+                continue
+        except Exception:
+            continue
+
+        # Verify HMAC signature
+        payload = {
+            "user_id": doc["user_id"],
+            "status": doc["status"],
+            "start_param": doc.get("start_param", ""),
+            "timestamp": doc.get("timestamp", ""),
+            "signature": doc.get("signature", ""),
+        }
+        if not verify_registration_callback(payload):
+            logger.warning(f"Invalid signature in registration callback for user {user_id}")
+            continue
+
+        # Mark user as registered
+        registered_users.add(user_id)
+        register_user(user_id, None, None)
+        logger.info(f"Auto-registered user {user_id} via callback poller")
+
+        # Delete registration prompt if it exists
+        msg_id, chat_id = get_registration_prompt_msg(user_id)
+        if not msg_id or not chat_id:
+            user_data = app.user_data.get(user_id)
+            if user_data:
+                msg_id = user_data.get("registration_message_id")
+                chat_id = user_data.get("registration_chat_id")
+        if msg_id and chat_id:
+            try:
+                await bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                logger.info(f"Deleted registration message {msg_id} for user {user_id} via poller")
+            except Exception as e:
+                logger.warning(f"Could not delete registration message for user {user_id} via poller: {e}")
+            clear_registration_prompt_msg(user_id)
+            user_data = app.user_data.get(user_id)
+            if user_data:
+                user_data.pop("registration_message_id", None)
+                user_data.pop("registration_chat_id", None)
+
+        # Send dedicated success message with profile details, then main menu
+        try:
+            profile = None
+            try:
+                database2 = get_db()
+                if database2 is not None:
+                    profile = database2.freelancer_profiles.find_one({"user_id": user_id})
+            except Exception:
+                pass
+            if profile:
+                skills_str = ", ".join(profile.get("primary_skills", [])) or "N/A"
+                location = profile.get("country", "") or "N/A"
+                success_text = (
+                    "✅ Freelancer Profile Completed!\n\n"
+                    f"👤 Name: {profile.get('full_name', 'N/A')}\n"
+                    f"📧 Email: {profile.get('email', 'N/A')}\n"
+                    f"📱 Phone: {profile.get('phone', 'N/A')}\n"
+                    f"📍 Location: {location}\n"
+                    f"💼 Skills: {skills_str}\n"
+                    f"⭐️ Level: {profile.get('headline', 'N/A')}"
+                )
+            else:
+                success_text = "Profile completed successfully"
+            await bot.send_message(chat_id=user_id, text=success_text)
+        except Exception as e:
+            logger.error(f"Failed to send success DM to user {user_id}: {e}")
+
+        try:
+            await send_main_menu_to_user(bot, user_id, profile_just_completed=True)
+        except Exception as e:
+            logger.error(f"Failed to send main menu to user {user_id}: {e}")
+
+async def _callback_poller_loop(app):
+    """Background loop that polls registration_callbacks every 3 seconds."""
+    await asyncio.sleep(5)
+    while True:
+        try:
+            await check_registration_callbacks(app)
+        except Exception as e:
+            logger.error(f"Callback poller error: {e}")
+        await asyncio.sleep(3)
 
 # ---------------------------
 # Contact handler for phone number sharing
@@ -673,10 +906,7 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Phone number saved! 📱",
             reply_markup=ReplyKeyboardRemove(),
         )
-        if is_profile_setup_complete(user_id):
-            await send_job_details(update, context)
-        else:
-            await prompt_profile_setup(update, context)
+        await prompt_profile_setup(update, context)
     elif contact:
         await update.message.reply_text("Please share your own phone number using the Share button.")
 
@@ -697,26 +927,34 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                 first_name = update.effective_user.first_name
                 registered_users.add(user_id)
                 register_user(user_id, username, first_name)
+
+                # Delete registration prompt if it exists
+                msg_id, chat_id = get_registration_prompt_msg(user_id)
+                if not msg_id or not chat_id:
+                    msg_id = context.user_data.get("registration_message_id")
+                    chat_id = context.user_data.get("registration_chat_id")
+                if msg_id and chat_id:
+                    try:
+                        await context.bot.delete_message(chat_id=chat_id, message_id=msg_id)
+                        logger.info(f"Deleted registration message {msg_id} for user {user_id} in handle_web_app_data")
+                    except Exception as e:
+                        logger.warning(f"Could not delete registration message: {e}")
+                    clear_registration_prompt_msg(user_id)
+                    context.user_data.pop("registration_message_id", None)
+                    context.user_data.pop("registration_chat_id", None)
+
                 await post_registration_to_channel(context, user_id, username or "")
-                context.user_data['awaiting_phone'] = True
-                await update.effective_chat.send_message(
-                    f"✅ *Registration Successful!* 🎉\n\nWelcome, *{first_name}*!\n\n"
-                    "Please share your phone number using the button below so clients can reach you."
-                )
+                chat_id = update.effective_chat.id if update.effective_chat else user_id
+                await send_main_menu_to_user(context.bot, user_id, chat_id=chat_id)
             elif parsed_data.get('action') == 'profile_complete':
                 user_id = update.effective_user.id
                 logger.info(f"Profile completed for user {user_id}")
                 registered_users.add(user_id)
                 context.user_data['_profile_just_completed'] = True
-                job_id = parsed_data.get('job_id') or get_pending_job_id(context)
-                if job_id:
-                    context.user_data['pending_job_id'] = job_id
-                    await send_job_details(update, context, job_id)
-                else:
-                    await menu_callback(update, context)
+                await menu_callback(update, context)
         except json.JSONDecodeError:
             pass
-        except Exception:
+        except Exception as e:
             pass
 
 # ---------------------------
@@ -727,24 +965,6 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     lang_code = user_languages.get(user_id, 'en')
     text = update.effective_message.text.strip()
 
-    # Intercept API's "Registration Successful" message and register user in-memory
-    if "Registration Successful" in text:
-        registered_users.add(user_id)
-        register_user(user_id, update.effective_user.username, update.effective_user.first_name)
-        return
-
-    if text == "❌ Cancel" and (
-        context.user_data.get("awaiting_phone")
-        or (is_user_registered(user_id) and not has_user_phone(user_id))
-    ):
-        context.user_data.pop("awaiting_phone", None)
-        await update.effective_message.reply_text(
-            "Phone sharing skipped.",
-            reply_markup=ReplyKeyboardRemove(),
-        )
-        await prompt_profile_setup(update, context)
-        return
-    
     # Language-specific menu texts (all possible options)
     menu_texts = {
         'Menu': 'menu',
@@ -853,8 +1073,13 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '⬅️ ወደ ቅንብሮች ይመለሱ': 'settings',
         # Account settings buttons
         '👤 View Profile': 'account_view_profile',
+        '✏️ Edit': 'account_edit_profile',
+        '📝 Name': 'edit_name',
+        '🎂 Age': 'edit_age',
+        '⚧ Gender': 'edit_gender',
+        '📞 Phone': 'edit_contact',
+        '⬅️ Back': 'account_view_profile',
         '🔔 Notifications': 'account_notifications',
-        '🗑️ Delete Account': 'account_delete',
         '⬅️ Back to Account': 'settings_account',
         '❌ Cancel': 'settings_account',
         # CV settings buttons
@@ -874,6 +1099,34 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         '⬅️ Voltar aos Idiomas': 'settings_languages',
         '⬅️ ወደ ቋንቋዎች ይመለሱ': 'settings_languages',
     }
+
+    # Intercept API's success messages and register user in-memory
+    if "Registration Successful" in text or "Profile completed successfully" in text or "Freelancer Profile Completed" in text:
+        logger.info(f"Intercepted success message for user {user_id}, registering in-memory")
+        registered_users.add(user_id)
+        register_user(user_id, update.effective_user.username, update.effective_user.first_name)
+        return
+
+    # Check if we are waiting for a profile field text input (e.g. name, age, gender, phone/contact)
+    awaiting = context.user_data.get('awaiting_input')
+    if awaiting:
+        # If the user sends a cancel/back button or any registered menu button, cancel editing
+        if text in menu_texts or text == "❌ Cancel" or text.lower() == "cancel":
+            context.user_data.pop('awaiting_input', None)
+            # Fall through to process the menu button/cancel normally
+        else:
+            # Otherwise, process the text input for the profile edit
+            await text_input_handler(update, context)
+            return
+
+    if text == "❌ Cancel" and context.user_data.get("awaiting_phone"):
+        context.user_data.pop("awaiting_phone", None)
+        await update.effective_message.reply_text(
+            "Phone sharing skipped.",
+            reply_markup=ReplyKeyboardRemove(),
+        )
+        await prompt_profile_setup(update, context)
+        return
     
     # Handle notification toggle buttons (dynamic text based on current state)
     if text.startswith("🚨 Job Alerts:"):
@@ -900,45 +1153,24 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         _shared_notif_prefs[user_id]['marketing'] = not _shared_notif_prefs[user_id]['marketing']
         await send_notification_settings(update, context)
         return
-    elif text in ("⚠️ YES, DELETE MY ACCOUNT",):
-        user_id = update.effective_user.id
-        delete_user(user_id)
-        _shared_notif_prefs.pop(user_id, None)
-        await update.effective_message.reply_text(
-            "✅ Account Deleted Successfully\n\n"
-            "Your account has been permanently deleted from HustleX.\n\n"
-            "What was removed:\n"
-            "- Profile information\n"
-            "- Uploaded CV and documents\n"
-            "- Notification preferences\n"
-            "- All saved data\n\n"
-            "Thank you for using HustleX. You can create a new account anytime by using /start.\n\n"
-            "If you have feedback, contact @HustleXSupport",
-            reply_markup=ReplyKeyboardRemove()
-        )
-        await menu_callback(update, context)
+    elif text in ("❌ Cancel",) and not context.user_data.get("awaiting_phone"):
+        keyboard = [
+            [KeyboardButton("👤 View Profile"), KeyboardButton("🔔 Notifications")],
+            [KeyboardButton("⬅️ Back to Settings")]
+        ]
+        reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+        await update.effective_message.reply_text("⬅️", reply_markup=reply_markup)
         return
-    elif text in ("❌ Cancel",) and not (
-        context.user_data.get("awaiting_phone")
-        or (is_user_registered(user_id) and not has_user_phone(user_id))
-    ):
-        pass  # Will fall through to menu_texts or ignore
 
     # Check if the text matches any menu item
     action = menu_texts.get(text)
 
-    protected_actions = {
-        'menu', 'profile', 'applications', 'about', 'settings',
-        'settings_languages', 'settings_account', 'settings_cv', 'settings_terms',
-        'account_view_profile', 'account_notifications', 'account_delete',
-        'cv_view', 'cv_upload', 'cv_remove', 'terms_privacy',
-    }
     if action is None:
         return
 
-    if action in protected_actions and user_id not in registered_users and not is_user_registered(user_id):
-        await show_registration_prompt(update, context)
-        return
+    if action in ('profile', 'applications', 'about', 'settings', 'settings_languages', 'settings_account', 'settings_cv', 'settings_terms', 'account_view_profile', 'account_edit_profile', 'edit_name', 'edit_age', 'edit_gender', 'edit_contact', 'account_notifications', 'cv_view', 'cv_upload', 'cv_remove', 'terms_privacy'):
+        if not await require_registration(update, context):
+            return
     
     if action == 'menu':
         await menu_callback(update, context)
@@ -1004,7 +1236,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "Join *HustleX* today and turn your skills into opportunities! 🔥 "
             "Because here, *every hustle counts* 💼💎"
         )
-        await update.effective_message.reply_text(about_text, parse_mode="Markdown")
+        await update.effective_message.reply_text(about_text, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
     elif action == 'settings':
         await settings_cb(update, context)
     elif action == 'settings_languages':
@@ -1087,7 +1319,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name = profile.get('name') if profile else None
             age = profile.get('age') if profile else None
             sex = profile.get('sex') if profile else None
-            phone = (profile.get('phone') or profile.get('phone_number')) if profile else None
+            phone = (profile.get('phone') or profile.get('phone_number') or profile.get('contact_info')) if profile else None
             text = (
                 f"👤 Your Profile\n\n"
                 f"Personal Info:\n"
@@ -1099,49 +1331,112 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 f"- User ID: {user.id}\n\n"
                 f"Your profile is your digital handshake - keep it fresh!"
             )
-            keyboard = [[KeyboardButton("⬅️ Back to Settings")]]
+            keyboard = [
+                [KeyboardButton("✏️ Edit"), KeyboardButton("❌ Cancel")]
+            ]
             await update.effective_message.reply_text(
                 text,
                 reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
             )
         except Exception as e:
             await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
+    elif action == 'account_edit_profile':
+        try:
+            user = update.effective_user
+            profile = get_user_profile(user.id)
+            pov = "Not set"
+            name = (profile.get('name') if profile else None) or user.first_name or pov
+            age = (profile.get('age') if profile else None) or pov
+            sex = (profile.get('sex') if profile else None) or pov
+            phone = (profile.get('phone') or profile.get('phone_number') or profile.get('contact_info') if profile else None) or pov
+            text = (
+                f"Edit Profile\n\n"
+                f"Name: {name}\n"
+                f"Age: {age}\n"
+                f"Gender: {sex}\n"
+                f"Phone: {phone}\n"
+                f"Username: @{user.username or pov}\n"
+                f"User ID: {user.id}\n\n"
+                f"Select a field to edit:"
+            )
+            keyboard = [
+                [KeyboardButton("📝 Name"), KeyboardButton("🎂 Age")],
+                [KeyboardButton("⚧ Gender"), KeyboardButton("📞 Phone")],
+                [KeyboardButton("⬅️ Back")]
+            ]
+            await update.effective_message.reply_text(
+                text,
+                reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
+            )
+        except Exception as e:
+            await update.effective_message.reply_text(f"Error: {type(e).__name__}: {e}")
+    elif action == 'edit_name':
+        context.user_data['awaiting_input'] = 'name'
+        await update.effective_message.reply_text("Please send your new name as a message.")
+    elif action == 'edit_age':
+        context.user_data['awaiting_input'] = 'age'
+        await update.effective_message.reply_text("Please send your age as a number (16-100).")
+    elif action == 'edit_gender':
+        context.user_data['awaiting_input'] = 'gender'
+        await update.effective_message.reply_text("Please send your gender (Male, Female, or Other).")
+    elif action == 'edit_contact':
+        context.user_data['awaiting_input'] = 'contact'
+        await update.effective_message.reply_text("Please send your phone number or contact info.")
     elif action == 'account_notifications':
         await send_notification_settings(update, context)
-    elif action == 'account_delete':
-        await send_delete_confirmation(update, context)
     elif action == 'cv_view':
         user_id = update.effective_user.id
-        cv_data = get_user_cv(user_id)
-        if cv_data is not None and cv_data.get("cv_file_data") is not None:
-            file_bytes = cv_data["cv_file_data"]
+        cv_data = get_user_cv(user_id, include_binary=False)
+        cv_keyboard = ReplyKeyboardMarkup([
+            [KeyboardButton("👁️ View Current CV"), KeyboardButton("📤 Upload New CV")],
+            [KeyboardButton("🗑️ Remove CV"), KeyboardButton("⬅️ Back to Settings")]
+        ], resize_keyboard=True)
+        if cv_data is not None and (cv_data.get("cv_file_id") or (cv_data.get("cv_filename") is not None)):
             filename = cv_data.get("cv_filename", "cv.pdf")
-            await update.effective_message.reply_text(f"👁️ *Your CV*\n\n📁 *File:* {filename}\n\n📎 Sending file...", parse_mode="Markdown")
-            await context.bot.send_document(
-                chat_id=user_id,
-                document=io.BytesIO(file_bytes if isinstance(file_bytes, bytes) else bytes(file_bytes)),
-                filename=filename,
-                caption=f"📄 Your CV: {filename}"
-            )
+            await update.effective_message.reply_text(f"👁️ Your CV\n\n📁 File: {filename}\n\nSending file...", reply_markup=cv_keyboard)
+            if cv_data.get("cv_file_id"):
+                await context.bot.send_document(
+                    chat_id=user_id,
+                    document=cv_data["cv_file_id"],
+                    filename=filename,
+                    caption=f"Your CV: {filename}"
+                )
+            else:
+                cv_data_full = get_user_cv(user_id, include_binary=True)
+                file_bytes = cv_data_full["cv_file_data"]
+                await context.bot.send_document(
+                    chat_id=user_id,
+                    document=io.BytesIO(file_bytes if isinstance(file_bytes, bytes) else bytes(file_bytes)),
+                    filename=filename,
+                    caption=f"Your CV: {filename}"
+                )
         else:
-            await update.effective_message.reply_text("❌ No CV uploaded yet!", parse_mode="Markdown")
+            await update.effective_message.reply_text("No CV uploaded yet.", reply_markup=cv_keyboard)
     elif action == 'cv_upload':
-        await update.effective_message.reply_text("📤 *Upload CV*\n\nPlease send your CV file as a document (PDF or DOCX).", parse_mode="Markdown")
+        await update.effective_message.reply_text(
+            "Upload CV\n\nPlease send your CV file as a document (PDF or DOCX).",
+            reply_markup=ReplyKeyboardMarkup([[KeyboardButton("⬅️ Back to My CV")]], resize_keyboard=True)
+        )
     elif action == 'cv_remove':
         user_id = update.effective_user.id
-        cv_data = get_user_cv(user_id)
-        if cv_data is not None and cv_data.get("cv_file_data") is not None:
+        cv_data = get_user_cv(user_id, include_binary=False)
+        cv_keyboard = ReplyKeyboardMarkup([
+            [KeyboardButton("📤 Upload New CV")],
+            [KeyboardButton("⬅️ Back to My CV")]
+        ], resize_keyboard=True)
+        if cv_data is not None and cv_data.get("cv_filename") is not None:
             save_profile_fields(user_id, {
                 "cv_file_data": None,
                 "cv_filename": None,
                 "cv_mime_type": None,
                 "cv_file_size": None,
                 "cv_upload_date": None,
+                "cv_file_id": None,
             })
             user_cvs.pop(user_id, None)
-            await update.effective_message.reply_text("✅ CV removed successfully!", parse_mode="Markdown")
+            await update.effective_message.reply_text("CV removed successfully.", reply_markup=cv_keyboard)
         else:
-            await update.effective_message.reply_text("❌ No CV to remove!", parse_mode="Markdown")
+            await update.effective_message.reply_text("No CV to remove.", reply_markup=cv_keyboard)
     elif action == 'terms_privacy':
         await update.effective_message.reply_text(
             "🔒 *Privacy Policy*\n\n"
@@ -1168,14 +1463,15 @@ async def applications_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.effective_message.reply_text(
             f"📋 *Applications*\n\nClick here to access your applications: {applications_url}",
-            parse_mode="Markdown"
+            parse_mode="Markdown",
+            reply_markup=ReplyKeyboardRemove()
         )
 
 async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     about_text = (
         "🚀 *About HustleX*\n\n"
         "Welcome to *HustleX* – where *ambition meets opportunity!* ✨\n\n"
-        "At HustleX, we believe talent has *no limits* 🌍. Whether you’re a designer 🎨, "
+        "At HustleX, we believe talent has *no limits* 🌍. Whether you're a designer 🎨, "
         "developer 💻, writer ✍️, or digital wizard 🪄, we connect skilled freelancers with "
         "clients who value *quality, creativity, and reliability*.\n\n"
         "*Our mission:* 💪 Elevate projects 📈 Transform careers 🌟\n\n"
@@ -1192,9 +1488,11 @@ async def about_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await q.answer()
         await q.edit_message_text(about_text, parse_mode="Markdown")
     else:
-        await update.effective_message.reply_text(about_text, parse_mode="Markdown")
+        await update.effective_message.reply_text(about_text, parse_mode="Markdown", reply_markup=ReplyKeyboardRemove())
 
 async def settings_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Clear any awaiting text input state when entering settings
+    context.user_data.pop('awaiting_input', None)
     user_id = update.effective_user.id
     lang_code = user_languages.get(user_id, 'en')
     
@@ -1392,6 +1690,8 @@ async def settings_languages_cb(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
 async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Clear any awaiting text input state when visiting account settings
+    context.user_data.pop('awaiting_input', None)
     try:
         user = update.effective_user
         if not user:
@@ -1405,14 +1705,14 @@ async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
             f"- Name: {(profile.get('name') if profile else None) or user.first_name or pov}\n"
             f"- Age: {(profile.get('age') if profile else None) or pov}\n"
             f"- Gender: {(profile.get('sex') if profile else None) or pov}\n"
-            f"- Phone: {(profile.get('phone') or profile.get('phone_number') if profile else None) or pov}\n"
+            f"- Phone: {(profile.get('phone') or profile.get('phone_number') or profile.get('contact_info') if profile else None) or pov}\n"
             f"- Username: @{user.username or pov}\n"
             f"- User ID: {user.id}\n\n"
             f"Manage your account below:"
         )
         keyboard = [
             [KeyboardButton("👤 View Profile"), KeyboardButton("🔔 Notifications")],
-            [KeyboardButton("🗑️ Delete Account"), KeyboardButton("⬅️ Back to Settings")]
+            [KeyboardButton("⬅️ Back to Settings")]
         ]
         reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
         
@@ -1430,8 +1730,8 @@ async def settings_account_cb(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 async def settings_cv_cb(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
-    cv_data = get_user_cv(user_id)
-    has_cv = cv_data is not None and cv_data.get("cv_file_data") is not None
+    cv_data = get_user_cv(user_id, include_binary=False)
+    has_cv = cv_data is not None and cv_data.get("cv_filename") is not None
     
     if has_cv:
         filename = cv_data.get("cv_filename", "Unknown")
@@ -1622,10 +1922,9 @@ async def cv_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     
     user_id = update.effective_user.id
-    cv_data = get_user_cv(user_id)
+    cv_data = get_user_cv(user_id, include_binary=False)
     
-    if cv_data is not None and cv_data.get("cv_file_data") is not None:
-        file_bytes = cv_data["cv_file_data"]
+    if cv_data is not None and (cv_data.get("cv_file_id") or (cv_data.get("cv_filename") is not None)):
         filename = cv_data.get("cv_filename", "cv.pdf")
         
         # Send the CV file directly to the user
@@ -1635,12 +1934,22 @@ async def cv_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             parse_mode="Markdown"
         )
         
-        await context.bot.send_document(
-            chat_id=user_id,
-            document=io.BytesIO(file_bytes if isinstance(file_bytes, bytes) else bytes(file_bytes)),
-            filename=filename,
-            caption=f"📄 Your CV: {filename}"
-        )
+        if cv_data.get("cv_file_id"):
+            await context.bot.send_document(
+                chat_id=user_id,
+                document=cv_data["cv_file_id"],
+                filename=filename,
+                caption=f"📄 Your CV: {filename}"
+            )
+        else:
+            cv_data_full = get_user_cv(user_id, include_binary=True)
+            file_bytes = cv_data_full["cv_file_data"]
+            await context.bot.send_document(
+                chat_id=user_id,
+                document=io.BytesIO(file_bytes if isinstance(file_bytes, bytes) else bytes(file_bytes)),
+                filename=filename,
+                caption=f"📄 Your CV: {filename}"
+            )
         
         keyboard = [
             [InlineKeyboardButton("📤 Upload New CV", callback_data="cv_upload")],
@@ -1683,8 +1992,8 @@ async def cv_remove_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await q.answer()
     
     user_id = update.effective_user.id
-    cv_data = get_user_cv(user_id)
-    has_cv = cv_data is not None and cv_data.get("cv_file_data") is not None
+    cv_data = get_user_cv(user_id, include_binary=False)
+    has_cv = cv_data is not None and cv_data.get("cv_filename") is not None
     
     if has_cv:
         # Remove CV from MongoDB
@@ -1694,6 +2003,7 @@ async def cv_remove_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "cv_mime_type": None,
             "cv_file_size": None,
             "cv_upload_date": None,
+            "cv_file_id": None,
         })
         
         # Remove from in-memory too
@@ -1740,23 +2050,127 @@ async def account_edit_profile_handler(update: Update, context: ContextTypes.DEF
     q = update.callback_query
     await q.answer()
     
+    # Clear any awaiting text input state when visiting the edit menu
+    context.user_data.pop('awaiting_input', None)
+    
     user = update.effective_user
+    profile = get_user_profile(user.id)
+    pov = "Not set"
+    name = escape_markdown((profile.get('name') if profile else None) or user.first_name or pov)
+    age = escape_markdown((profile.get('age') if profile else None) or pov)
+    sex = escape_markdown((profile.get('sex') if profile else None) or pov)
+    phone = escape_markdown((profile.get('phone') or profile.get('phone_number') or profile.get('contact_info') if profile else None) or pov)
+    username = escape_markdown(user.username or pov)
     
-    # Inherit profile from Telegram only
-    name = f"{user.first_name or 'Not set'} {user.last_name or ''}".strip()
-    telegram_username = f"@{user.username}" if user.username else "Not set"
-    
+    text = (
+        f"👤 *Edit Profile*\n\n"
+        f"📝 Name: {name}\n"
+        f"🎂 Age: {age}\n"
+        f"⚧ Gender: {sex}\n"
+        f"📞 Phone: {phone}\n"
+        f"🔖 Username: @{username}\n"
+        f"🆔 User ID: {user.id}\n\n"
+        f"Select a field to edit:"
+    )
     keyboard = [
-        [InlineKeyboardButton("⬅️ Back to Account", callback_data="settings_account")]
+        [InlineKeyboardButton("📝 Name", callback_data="edit_name"),
+         InlineKeyboardButton("🎂 Age", callback_data="edit_age")],
+        [InlineKeyboardButton("⚧ Gender", callback_data="edit_gender"),
+         InlineKeyboardButton("📞 Phone", callback_data="edit_contact")],
+        [InlineKeyboardButton("⬅️ Back to Profile", callback_data="account_view_profile")]
     ]
     
     await safe_edit_message(
         q,
-        f"👤 *Profile*\n\n"
-        f"• Name: {name}\n"
-        f"• Username: {telegram_username}\n"
-        f"• User ID: {user.id}\n\n"
-        f"ℹ️ Profile data is inherited from Telegram and not editable here.",
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown",
+        context=context
+    )
+
+async def account_view_profile_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    # Clear any pending input state when viewing profile
+    context.user_data.pop('awaiting_input', None)
+
+    user = update.effective_user
+    profile = get_user_profile(user.id)
+    pov = "Not set"
+    name = profile.get('name') if profile else None
+    age = profile.get('age') if profile else None
+    sex = profile.get('sex') if profile else None
+    phone = (profile.get('phone') or profile.get('phone_number') or profile.get('contact_info')) if profile else None
+    text = (
+        f"👤 Your Profile\n\n"
+        f"Personal Info:\n"
+        f"- Name: {name or user.first_name or pov}\n"
+        f"- Age: {age or pov}\n"
+        f"- Gender: {sex or pov}\n"
+        f"- Phone: {phone or pov}\n"
+        f"- Username: @{user.username or pov}\n"
+        f"- User ID: {user.id}\n\n"
+        f"Your profile is your digital handshake - keep it fresh!"
+    )
+    keyboard = [
+        [InlineKeyboardButton("✏️ Edit", callback_data="account_edit_profile"),
+         InlineKeyboardButton("❌ Cancel", callback_data="settings_account")]
+    ]
+    await safe_edit_message(
+        q,
+        text,
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        context=context
+    )
+
+async def edit_gender_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    user_id = update.effective_user.id
+    lang_code = user_languages.get(user_id, 'en')
+
+    title = "⚧ *Edit Gender*"
+    prompt = "Please send your gender (Male, Female, or Other)."
+    back_text = "⬅️ Back to Profile"
+
+    keyboard = [
+        [InlineKeyboardButton("Male", callback_data="set_gender_Male"),
+         InlineKeyboardButton("Female", callback_data="set_gender_Female")],
+        [InlineKeyboardButton("Other", callback_data="set_gender_Other")],
+        [InlineKeyboardButton(back_text, callback_data="account_edit_profile")]
+    ]
+
+    await safe_edit_message(
+        q,
+        f"{title}\n\n{prompt}",
+        reply_markup=InlineKeyboardMarkup(keyboard),
+        parse_mode="Markdown",
+        context=context
+    )
+
+    context.user_data['awaiting_input'] = 'gender'
+
+async def set_gender_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    q = update.callback_query
+    await q.answer()
+
+    gender = q.data.replace("set_gender_", "")
+    user_id = update.effective_user.id
+    profile = get_user_profile(user_id)
+    if profile:
+        save_profile_fields(user_id, {"sex": gender})
+    if user_id in user_profiles:
+        user_profiles[user_id]['sex'] = gender
+    context.user_data.pop('awaiting_input', None)
+
+    keyboard = [
+        [InlineKeyboardButton("⬅️ Back to Profile", callback_data="account_edit_profile")]
+    ]
+    await safe_edit_message(
+        q,
+        f"✅ *Gender Updated Successfully!*\n\nYour gender has been changed to: *{gender}*",
         reply_markup=InlineKeyboardMarkup(keyboard),
         parse_mode="Markdown",
         context=context
@@ -2042,20 +2456,12 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if user_id not in user_profiles:
         user_profiles[user_id] = {}
     
-    # Language-specific back button text
-    back_text = {
-        'en': "⬅️ Back to Profile",
-        'es': "⬅️ Volver al Perfil",
-        'fr': "⬅️ Retour au Profil",
-        'de': "⬅️ Zurück zum Profil",
-        'it': "⬅️ Torna al Profilo",
-        'pt': "⬅️ Voltar ao Perfil",
-        'am': "⬅️ ወደ መገለጫ ይመለሱ"
-    }.get(lang_code, "⬅️ Back to Profile")
-    
-    keyboard = [
-        [InlineKeyboardButton(back_text, callback_data="account_edit_profile")]
-    ]
+    # Reply keyboard for edit profile view (same as account_edit_profile)
+    edit_keyboard = ReplyKeyboardMarkup([
+        [KeyboardButton("📝 Name"), KeyboardButton("🎂 Age")],
+        [KeyboardButton("⚧ Gender"), KeyboardButton("📞 Phone")],
+        [KeyboardButton("⬅️ Back")]
+    ], resize_keyboard=True)
     
     # Check what kind of input we're waiting for
     if context.user_data.get('awaiting_input') == 'name':
@@ -2077,14 +2483,14 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         }.get(lang_code, "✅ *Name Updated Successfully!*")
         
         updated_to = {
-            'en': f"Your profile name has been changed to: *{message_text}*",
-            'es': f"Tu nombre de perfil ha sido cambiado a: *{message_text}*",
-            'fr': f"Votre nom de profil a été changé à: *{message_text}*",
-            'de': f"Ihr Profilname wurde geändert zu: *{message_text}*",
-            'it': f"Il tuo nome del profilo è stato cambiato a: *{message_text}*",
-            'pt': f"Seu nome de perfil foi alterado para: *{message_text}*",
-            'am': f"የመገለጫ ስምዎ ወደ: *{message_text}* ተቀይሯል"
-        }.get(lang_code, f"Your profile name has been changed to: *{message_text}*")
+            'en': f"Your profile name has been changed to: *{escape_markdown(message_text)}*",
+            'es': f"Tu nombre de perfil ha sido cambiado a: *{escape_markdown(message_text)}*",
+            'fr': f"Votre nom de profil a été changé à: *{escape_markdown(message_text)}*",
+            'de': f"Ihr Profilname wurde geändert zu: *{escape_markdown(message_text)}*",
+            'it': f"Il tuo nome del profilo è stato cambiato a: *{escape_markdown(message_text)}*",
+            'pt': f"Seu nome de perfil foi alterado para: *{escape_markdown(message_text)}*",
+            'am': f"የመገለጫ ስምዎ ወደ: *{escape_markdown(message_text)}* ተቀይሯል"
+        }.get(lang_code, f"Your profile name has been changed to: *{escape_markdown(message_text)}*")
         
         note = {
             'en': "This name will be used for all your HustleX activities.",
@@ -2103,13 +2509,21 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"{title}\n\n"
             f"{updated_to}\n\n"
             f"{note}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
+            reply_markup=edit_keyboard
         )
     
+    elif context.user_data.get('awaiting_input') == 'gender':
+        user_profiles[user_id]['sex'] = message_text
+        context.user_data.pop('awaiting_input', None)
+        await save_profile_to_api(user_id, user_profiles[user_id])
+        await update.message.reply_text(
+            f"✅ *Gender Updated Successfully!*\n\nYour gender has been set to: *{escape_markdown(message_text)}*",
+            reply_markup=edit_keyboard
+        )
+
     elif context.user_data.get('awaiting_input') == 'contact':
         # Store the new contact info
-        text_input_handler.user_profiles[user_id]['contact_info'] = message_text
+        user_profiles[user_id]['contact_info'] = message_text
         
         # Clear the awaiting input flag
         context.user_data.pop('awaiting_input', None)
@@ -2126,14 +2540,14 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
         }.get(lang_code, "✅ *Contact Information Updated Successfully!*")
         
         updated_to = {
-            'en': f"Your contact information has been updated to: *{message_text}*",
-            'es': f"Tu información de contacto ha sido actualizada a: *{message_text}*",
-            'fr': f"Vos coordonnées ont été mises à jour à: *{message_text}*",
-            'de': f"Ihre Kontaktinformationen wurden aktualisiert auf: *{message_text}*",
-            'it': f"Le tue informazioni di contatto sono state aggiornate a: *{message_text}*",
-            'pt': f"Suas informações de contato foram atualizadas para: *{message_text}*",
-            'am': f"የመገኛ መረጃዎ ወደ: *{message_text}* ተዘምኗል"
-        }.get(lang_code, f"Your contact information has been updated to: *{message_text}*")
+            'en': f"Your contact information has been updated to: *{escape_markdown(message_text)}*",
+            'es': f"Tu información de contacto ha sido actualizada a: *{escape_markdown(message_text)}*",
+            'fr': f"Vos coordonnées ont été mises à jour à: *{escape_markdown(message_text)}*",
+            'de': f"Ihre Kontaktinformationen wurden aktualisiert auf: *{escape_markdown(message_text)}*",
+            'it': f"Le tue informazioni di contatto sono state aggiornate a: *{escape_markdown(message_text)}*",
+            'pt': f"Suas informações de contato foram atualizadas para: *{escape_markdown(message_text)}*",
+            'am': f"የመገኛ መረጃዎ ወደ: *{escape_markdown(message_text)}* ተዘምኗል"
+        }.get(lang_code, f"Your contact information has been updated to: *{escape_markdown(message_text)}*")
         
         note = {
             'en': "This will be used for employers to reach you.",
@@ -2152,8 +2566,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             f"{title}\n\n"
             f"{updated_to}\n\n"
             f"{note}",
-            reply_markup=InlineKeyboardMarkup(keyboard),
-            parse_mode="Markdown"
+            reply_markup=edit_keyboard
         )
     
     elif context.user_data.get('awaiting_input') == 'age':
@@ -2207,14 +2620,14 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
             }.get(lang_code, "✅ *Age Updated Successfully!*")
             
             updated_to = {
-                'en': f"Your age has been updated to: *{age}*",
-                'es': f"Tu edad ha sido actualizada a: *{age}*",
-                'fr': f"Votre âge a été mis à jour à: *{age}*",
-                'de': f"Ihr Alter wurde aktualisiert auf: *{age}*",
-                'it': f"La tua età è stata aggiornata a: *{age}*",
-                'pt': f"Sua idade foi atualizada para: *{age}*",
-                'am': f"እድሜዎ ወደ: *{age}* ተዘምኗል"
-            }.get(lang_code, f"Your age has been updated to: *{age}*")
+                'en': f"Your age has been updated to: *{escape_markdown(age)}*",
+                'es': f"Tu edad ha sido actualizada a: *{escape_markdown(age)}*",
+                'fr': f"Votre âge a été mis à jour à: *{escape_markdown(age)}*",
+                'de': f"Ihr Alter wurde aktualisiert auf: *{escape_markdown(age)}*",
+                'it': f"La tua età è stata aggiornata a: *{escape_markdown(age)}*",
+                'pt': f"Sua idade foi atualizada para: *{escape_markdown(age)}*",
+                'am': f"እድሜዎ ወደ: *{escape_markdown(age)}* ተዘምኗል"
+            }.get(lang_code, f"Your age has been updated to: *{escape_markdown(age)}*")
             
             note = {
                 'en': "This information will be used for job matching.",
@@ -2233,8 +2646,7 @@ async def text_input_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
                 f"{title}\n\n"
                 f"{updated_to}\n\n"
                 f"{note}",
-                reply_markup=InlineKeyboardMarkup(keyboard),
-                parse_mode="Markdown"
+                reply_markup=edit_keyboard
             )
         except ValueError:
             # Invalid input error messages
@@ -2287,23 +2699,6 @@ async def send_notification_settings(update, context):
         reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
     )
 
-async def send_delete_confirmation(update, context):
-    keyboard = [
-        [KeyboardButton("⚠️ YES, DELETE MY ACCOUNT")],
-        [KeyboardButton("❌ Cancel")]
-    ]
-    await update.effective_message.reply_text(
-        "🗑️ Delete Account\n\n"
-        "WARNING: This action is permanent and cannot be undone!\n\n"
-        "What will be deleted:\n"
-        "- Your profile information\n"
-        "- Uploaded CV and documents\n"
-        "- Job application history\n"
-        "- All saved preferences\n\n"
-        "Are you sure you want to permanently delete your account?\n\n"
-        "Tap the button below to confirm.",
-        reply_markup=ReplyKeyboardMarkup(keyboard, resize_keyboard=True)
-    )
 
 async def privacy_policy_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
@@ -2360,6 +2755,7 @@ async def save_profile_to_api(user_id, profile_data):
             fields["sex"] = profile_data["sex"]
         if profile_data.get("contact_info"):
             fields["contact_info"] = profile_data["contact_info"]
+            fields["phone"] = profile_data["contact_info"]
         if profile_data.get("profile_pic_file_id"):
             fields["profile_pic_file_id"] = profile_data["profile_pic_file_id"]
         if not fields:
@@ -2387,25 +2783,31 @@ async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         # Validate file type
         if file_name.lower().endswith(('.pdf', '.docx')) or mime_type in ['application/pdf', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document']:
-            # Download actual file bytes from Telegram
-            try:
-                tele_file = await context.bot.get_file(m.document.file_id)
-                file_bytes = await tele_file.download_as_bytearray()
-            except Exception as e:
-                logger.error(f"Failed to download CV file: {e}")
-                file_bytes = None
-            
-            # Save to MongoDB
-            cv_fields = {
-                "cv_file_data": file_bytes,
+            # --- Step 1: Save lightweight metadata + file_id immediately (no binary yet) ---
+            meta_fields = {
                 "cv_filename": file_name,
                 "cv_mime_type": mime_type,
                 "cv_file_size": file_size,
                 "cv_upload_date": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                "cv_file_id": m.document.file_id,
             }
-            save_profile_fields(user_id, cv_fields)
-            
-            # Also keep in-memory for fast access
+            meta_saved = save_profile_fields(user_id, meta_fields)
+            if not meta_saved:
+                logger.error(f"Failed to save CV metadata for user {user_id}")
+                await m.reply_text(
+                    "❌ Failed to save your CV due to a database error. Please try again."
+                )
+                return
+
+            # --- Step 2: Download binary and persist (best-effort) ---
+            try:
+                tele_file = await context.bot.get_file(m.document.file_id)
+                file_bytes = bytes(await tele_file.download_as_bytearray())
+                save_profile_fields(user_id, {"cv_file_data": file_bytes})
+            except Exception as e:
+                logger.warning(f"CV binary download/save failed for user {user_id}: {e} — file_id is still available.")
+
+            # Also update in-memory cache
             user_cvs[user_id] = {
                 'file_id': m.document.file_id,
                 'filename': file_name,
@@ -2413,20 +2815,16 @@ async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 'mime_type': mime_type,
                 'upload_date': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             }
-            
-            keyboard = [
-                [InlineKeyboardButton("👁️ View CV", callback_data="cv_view")],
-                [InlineKeyboardButton("📄 My CV Settings", callback_data="settings_cv")]
-            ]
-            
+
             await m.reply_text(
-                f"✅ *CV Upload Successful!*\n\n"
-                f"📁 *File:* {file_name}\n"
-                f"📏 *Size:* {file_size:,} bytes\n"
-                f"📝 *Type:* {'PDF' if file_name.lower().endswith('.pdf') else 'Word Document'}\n\n"
-                f"🎉 Your CV is now ready for job applications!",
-                parse_mode="Markdown",
-                reply_markup=InlineKeyboardMarkup(keyboard)
+                f"✅ CV Upload Successful!\n\n"
+                f"File: {file_name}\n"
+                f"Size: {file_size:,} bytes\n"
+                f"Type: {'PDF' if file_name.lower().endswith('.pdf') else 'Word Document'}\n\n"
+                f"Your CV is now ready for job applications!",
+                reply_markup=ReplyKeyboardMarkup([
+                    [KeyboardButton("👁️ View Current CV"), KeyboardButton("⬅️ Back to My CV")]
+                ], resize_keyboard=True)
             )
         else:
             await m.reply_text(
@@ -2522,55 +2920,55 @@ async def file_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def post_job_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.callback_query:
         await update.callback_query.answer()
-        await update.callback_query.message.reply_text("📝 Enter Job Title:")
+        await update.callback_query.message.reply_text("📝 Enter Job Title:", reply_markup=ReplyKeyboardRemove())
     else:
-        await update.message.reply_text("📝 Enter Job Title:")
+        await update.message.reply_text("📝 Enter Job Title:", reply_markup=ReplyKeyboardRemove())
     return JOB_TITLE
 
 async def job_title(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["job_title"] = update.message.text
-    await update.message.reply_text("Enter Job Type (Full-time, Part-time, Freelance):")
+    await update.message.reply_text("Enter Job Type (Full-time, Part-time, Freelance):", reply_markup=ReplyKeyboardRemove())
     return JOB_TYPE
 
 async def job_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["job_type"] = update.message.text
-    await update.message.reply_text("Enter Work Location:")
+    await update.message.reply_text("Enter Work Location:", reply_markup=ReplyKeyboardRemove())
     return WORK_LOCATION
 
 async def work_location(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["work_location"] = update.message.text
-    await update.message.reply_text("Enter Salary:")
+    await update.message.reply_text("Enter Salary:", reply_markup=ReplyKeyboardRemove())
     return SALARY
 
 async def salary(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["salary"] = update.message.text
-    await update.message.reply_text("Enter Deadline (YYYY-MM-DD):")
+    await update.message.reply_text("Enter Deadline (YYYY-MM-DD):", reply_markup=ReplyKeyboardRemove())
     return DEADLINE
 
 async def deadline(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["deadline"] = update.message.text
-    await update.message.reply_text("Enter Job Description:")
+    await update.message.reply_text("Enter Job Description:", reply_markup=ReplyKeyboardRemove())
     return DESCRIPTION
 
 async def description(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["description"] = update.message.text
-    await update.message.reply_text("Enter Client Type (Private / Other):")
+    await update.message.reply_text("Enter Client Type (Private / Other):", reply_markup=ReplyKeyboardRemove())
     return CLIENT_TYPE
 
 async def client_type(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["client_type"] = update.message.text
-    await update.message.reply_text("Enter Company Name:")
+    await update.message.reply_text("Enter Company Name:", reply_markup=ReplyKeyboardRemove())
     return COMPANY_NAME
 
 async def company_name(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["company_name"] = update.message.text
-    await update.message.reply_text("Is the company verified? (✅ / No)")
+    await update.message.reply_text("Is the company verified? (✅ / No)", reply_markup=ReplyKeyboardRemove())
     return VERIFIED
 
 async def verified(update: Update, context: ContextTypes.DEFAULT_TYPE):
     text = update.message.text.strip().lower()
     if text not in ["yes", "no", "✅"]:
-        await update.message.reply_text("Please reply with ✅ or No")
+        await update.message.reply_text("Please reply with ✅ or No", reply_markup=ReplyKeyboardRemove())
         return VERIFIED
     
     # Set the value to ✅ if the input is 'yes' or the checkmark symbol
@@ -2578,12 +2976,12 @@ async def verified(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["verified"] = "✅"
     else:
         context.user_data["verified"] = "No"
-    await update.message.reply_text("List any previous jobs posted by this company (or type 'None'):")
+    await update.message.reply_text("List any previous jobs posted by this company (or type 'None'):", reply_markup=ReplyKeyboardRemove())
     return PREVIOUS_JOBS
 
 async def previous_jobs(update: Update, context: ContextTypes.DEFAULT_TYPE):
     context.user_data["previous_jobs"] = update.message.text
-    await update.message.reply_text("Enter the link for 'View Details':")
+    await update.message.reply_text("Enter the link for 'View Details':", reply_markup=ReplyKeyboardRemove())
     return JOB_LINK
 
 async def job_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -2592,9 +2990,7 @@ async def job_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     job_id = save_job_to_db(job_data)
     job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
-    keyboard = [
-        [InlineKeyboardButton("🚀 Apply for this Job", web_app=WebAppInfo(url=job_details_url))],
-    ]
+    keyboard = [[InlineKeyboardButton("🚀 Apply for this Job", web_app=WebAppInfo(url=job_details_url))]]
 
     # Check channel ID and bot permissions
     CHANNEL_ID = "-1003194542999"  # TODO: Replace with the correct channel ID
@@ -2603,7 +2999,7 @@ async def job_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Error: Invalid channel ID. Please verify the CHANNEL_ID in the bot configuration.\n"
             "To find the correct ID, add the bot to the channel, send a message, and forward it to @userinfobot or @RawDataBot."
         )
-        await update.message.reply_text(error_msg)
+        await update.message.reply_text(error_msg, reply_markup=ReplyKeyboardRemove())
         logger.error(f"Job posting failed due to invalid CHANNEL_ID: {CHANNEL_ID}")
         return ConversationHandler.END
 
@@ -2612,7 +3008,7 @@ async def job_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "❌ Error: The bot does not have permission to post in the channel.\n"
             "Please make the bot an admin with 'Send Messages' permission."
         )
-        await update.message.reply_text(error_msg)
+        await update.message.reply_text(error_msg, reply_markup=ReplyKeyboardRemove())
         logger.error(f"Job posting failed due to insufficient permissions in channel: {CHANNEL_ID}")
         return ConversationHandler.END
 
@@ -2652,7 +3048,7 @@ async def job_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "channel_id": CHANNEL_ID,
             "timestamp": datetime.now().isoformat()
         })
-        await update.message.reply_text("✅ Job posted successfully!")
+        await update.message.reply_text("✅ Job posted successfully!", reply_markup=ReplyKeyboardRemove())
         logger.info(f"Job posted successfully to channel {CHANNEL_ID}")
     except TelegramError as e:
         error_msg = f"❌ Failed to post job: {str(e)}"
@@ -2790,7 +3186,7 @@ async def handle_channel_profile_message(update: Update, context: ContextTypes.D
             return
 
         database = get_db()
-        if not database:
+        if database is None:
             return
 
         user_info = database.registered_users.find_one({"username": username})
@@ -2828,10 +3224,11 @@ async def handle_channel_profile_message(update: Update, context: ContextTypes.D
 def main():
     async def post_init(application):
         await application.bot.set_my_commands([
-            BotCommand("start", "Main menu"),
-            BotCommand("profile", "Manage your freelancer profile"),
+            BotCommand("start", "Menu"),
         ])
         await application.bot.set_chat_menu_button(menu_button=MenuButtonCommands())
+        # Start background callback poller for registration handoff
+        asyncio.create_task(_callback_poller_loop(application))
 
     app = ApplicationBuilder().token(TOKEN).post_init(post_init).build()
     
@@ -2877,6 +3274,12 @@ def main():
 
     # Account management handlers
     app.add_handler(CallbackQueryHandler(account_edit_profile_handler, pattern="^account_edit_profile$"))
+    app.add_handler(CallbackQueryHandler(account_view_profile_handler, pattern="^account_view_profile$"))
+    app.add_handler(CallbackQueryHandler(edit_name_handler, pattern="^edit_name$"))
+    app.add_handler(CallbackQueryHandler(edit_age_handler, pattern="^edit_age$"))
+    app.add_handler(CallbackQueryHandler(edit_gender_handler, pattern="^edit_gender$"))
+    app.add_handler(CallbackQueryHandler(set_gender_handler, pattern="^set_gender_"))
+    app.add_handler(CallbackQueryHandler(edit_contact_handler, pattern="^edit_contact$"))
     app.add_handler(CallbackQueryHandler(privacy_policy_handler, pattern="^terms_privacy$"))
 
     # Channel member update handler (auto-register when user joins @HustleXeth)
