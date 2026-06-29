@@ -57,14 +57,35 @@
   <script>
     const pathParts = window.location.pathname.split('/').filter(Boolean);
     const JOB_ID = pathParts[pathParts.length - 1] || '6a31521bf3edf7daab32416c';
-    if (window.Telegram?.WebApp) {
-      window.Telegram.WebApp.expand();
+    const tg = window.Telegram?.WebApp;
+    
+    if (tg) {
+      tg.expand();
     }
 
     async function loadJob() {
       try {
-        const res = await fetch('/api/jobs/' + JOB_ID);
+        console.log('Loading job with ID:', JOB_ID);
+        console.log('Current URL:', window.location.href);
+        console.log('Telegram WebApp available:', !!tg);
+        
+        // Add timeout to prevent infinite loading
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 10000); // 10 second timeout
+        
+        const res = await fetch('/api/jobs/' + JOB_ID, { 
+          signal: controller.signal,
+          headers: {
+            'Accept': 'application/json'
+          }
+        });
+        
+        clearTimeout(timeoutId);
+        console.log('Response status:', res.status);
+        
         const data = await res.json();
+        console.log('Response data:', data);
+        
         if (!res.ok) throw new Error(data.detail || 'Job not found');
 
         document.getElementById('loading').style.display = 'none';
@@ -83,14 +104,36 @@
           btn.onclick = () => window.open(data.job_link, '_blank');
         }
       } catch (err) {
+        console.error('Error loading job:', err);
         document.getElementById('loading').style.display = 'none';
         const errEl = document.getElementById('error');
         errEl.style.display = 'block';
-        errEl.textContent = err.message || 'Failed to load job details';
+        
+        if (err.name === 'AbortError') {
+          errEl.textContent = 'Request timed out. Please check your connection and try again.';
+        } else {
+          errEl.textContent = err.message || 'Failed to load job details. Please try again later.';
+        }
       }
     }
 
-    loadJob();
+    // Check if user is authenticated via Telegram
+    if (tg && tg.initData) {
+      const user = tg.initDataUnsafe?.user;
+      if (user) {
+        console.log('User authenticated:', user.id, user.first_name);
+        loadJob();
+      } else {
+        console.log('No user data in Telegram init data');
+        document.getElementById('loading').style.display = 'none';
+        document.getElementById('error').style.display = 'block';
+        document.getElementById('error').textContent = 'Please open this page from the Telegram bot to view job details.';
+      }
+    } else {
+      console.log('Not running in Telegram WebApp or no init data');
+      // Still try to load job for testing purposes
+      loadJob();
+    }
   </script>
 </body>
 </html>
