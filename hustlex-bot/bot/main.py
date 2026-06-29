@@ -11,7 +11,6 @@ from dotenv import load_dotenv
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update, WebAppInfo, KeyboardButton, ReplyKeyboardMarkup, ReplyKeyboardRemove, BotCommand, MenuButtonCommands
 from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, MessageHandler, filters, ContextTypes, ConversationHandler, ChatMemberHandler
 from telegram.error import TelegramError
-from urllib.parse import urlparse
 import aiohttp
 import io
 from pymongo import MongoClient
@@ -368,7 +367,6 @@ async def show_registration_prompt(update: Update, context: ContextTypes.DEFAULT
     register_url = f"{WEBAPP_URL.rstrip('/')}/Register"
     keyboard = [[InlineKeyboardButton(messages['register'], web_app=WebAppInfo(url=register_url))]]
     reply_markup = InlineKeyboardMarkup(keyboard)
-    target = update.effective_message or update.effective_chat
     if update.effective_message:
         await update.effective_message.reply_text(messages['welcome'], reply_markup=reply_markup)
     else:
@@ -431,16 +429,13 @@ async def prompt_profile_setup(update: Update, context: ContextTypes.DEFAULT_TYP
 async def send_job_details(update: Update, context: ContextTypes.DEFAULT_TYPE, job_id: str = None):
     job_id = job_id or get_pending_job_id(context)
     job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
-    user_id = update.effective_user.id
-    lang_code = user_languages.get(user_id, 'en')
-    messages = {
-        'en': f"👋 Welcome! Here are the job details:\n\n{job_details_url}",
-    }
-    message = messages.get(lang_code, messages['en'])
+    keyboard = [[InlineKeyboardButton("💼 Open Job Details", web_app=WebAppInfo(url=job_details_url))]]
+    reply_markup = InlineKeyboardMarkup(keyboard)
+    msg = "🎉 Welcome back! Tap below to view the job and apply:"
     if update.effective_message:
-        await update.effective_message.reply_text(message)
+        await update.effective_message.reply_text(msg, reply_markup=reply_markup)
     else:
-        await update.effective_chat.send_message(message)
+        await update.effective_chat.send_message(msg, reply_markup=reply_markup)
 
 async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Route a registered user directly to menu or job details."""
@@ -460,7 +455,6 @@ async def route_registered_user(update: Update, context: ContextTypes.DEFAULT_TY
 async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Mark user as registered after completing registration on the website"""
     user_id = update.effective_user.id
-
     username = update.effective_user.username
     first_name = update.effective_user.first_name
     success = register_user(user_id, username, first_name)
@@ -475,7 +469,13 @@ async def register_complete(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     registered_users.add(user_id)
     await post_registration_to_channel(context, user_id, username or "")
-    await prompt_phone_share(update, context)
+
+    if not has_user_phone(user_id):
+        await prompt_phone_share(update, context)
+    elif not is_profile_setup_complete(user_id):
+        await prompt_profile_setup(update, context)
+    else:
+        await send_job_details(update, context)
 
 # ---------------------------
 # /start command
@@ -486,11 +486,30 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.effective_chat.send_message("❌ Error: Invalid bot token. Please contact the bot administrator.")
         logger.error("Cannot send message due to invalid bot token")
         return
-    
+
     job_id = parse_job_id_from_start(context.args)
     if job_id:
         context.user_data["pending_job_id"] = job_id
 
+    user_id = update.effective_user.id
+    registered = user_id in registered_users or is_user_registered(user_id)
+
+    if not registered:
+        # Unregistered: show registration mini app
+        await show_registration_prompt(update, context)
+        return
+
+    # Registered: check phone
+    if not has_user_phone(user_id):
+        await prompt_phone_share(update, context)
+        return
+
+    # Phone present: check profile
+    if not is_profile_setup_complete(user_id):
+        await prompt_profile_setup(update, context)
+        return
+
+    # Fully set up: show job details or menu
     await route_registered_user(update, context)
 
 # ---------------------------
@@ -654,7 +673,10 @@ async def handle_contact(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "✅ Phone number saved! 📱",
             reply_markup=ReplyKeyboardRemove(),
         )
-        await prompt_profile_setup(update, context)
+        if is_profile_setup_complete(user_id):
+            await send_job_details(update, context)
+        else:
+            await prompt_profile_setup(update, context)
     elif contact:
         await update.message.reply_text("Please share your own phone number using the Share button.")
 
@@ -686,13 +708,15 @@ async def handle_web_app_data(update: Update, context: ContextTypes.DEFAULT_TYPE
                 logger.info(f"Profile completed for user {user_id}")
                 registered_users.add(user_id)
                 context.user_data['_profile_just_completed'] = True
-                await menu_callback(update, context)
                 job_id = parsed_data.get('job_id') or get_pending_job_id(context)
                 if job_id:
+                    context.user_data['pending_job_id'] = job_id
                     await send_job_details(update, context, job_id)
+                else:
+                    await menu_callback(update, context)
         except json.JSONDecodeError:
             pass
-        except Exception as e:
+        except Exception:
             pass
 
 # ---------------------------
@@ -892,7 +916,7 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "If you have feedback, contact @HustleXSupport",
             reply_markup=ReplyKeyboardRemove()
         )
-        await show_menu(update, context)
+        await menu_callback(update, context)
         return
     elif text in ("❌ Cancel",) and not (
         context.user_data.get("awaiting_phone")
@@ -1603,7 +1627,6 @@ async def cv_view_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if cv_data is not None and cv_data.get("cv_file_data") is not None:
         file_bytes = cv_data["cv_file_data"]
         filename = cv_data.get("cv_filename", "cv.pdf")
-        mime_type = cv_data.get("cv_mime_type", "application/pdf")
         
         # Send the CV file directly to the user
         await q.edit_message_text(
@@ -1718,12 +1741,10 @@ async def account_edit_profile_handler(update: Update, context: ContextTypes.DEF
     await q.answer()
     
     user = update.effective_user
-    user_id = user.id
     
     # Inherit profile from Telegram only
     name = f"{user.first_name or 'Not set'} {user.last_name or ''}".strip()
     telegram_username = f"@{user.username}" if user.username else "Not set"
-    has_photo = False
     
     keyboard = [
         [InlineKeyboardButton("⬅️ Back to Account", callback_data="settings_account")]
@@ -2570,9 +2591,10 @@ async def job_link(update: Update, context: ContextTypes.DEFAULT_TYPE):
     job_data = context.user_data
 
     job_id = save_job_to_db(job_data)
-    apply_url = f"https://t.me/{BOT_USERNAME}?start=job_{job_id}"
     job_details_url = f"{WEBAPP_URL.rstrip('/')}/job-details/{job_id}"
-    keyboard = [[InlineKeyboardButton("Apply Job", url=apply_url)]]
+    keyboard = [
+        [InlineKeyboardButton("🚀 Apply for this Job", web_app=WebAppInfo(url=job_details_url))],
+    ]
 
     # Check channel ID and bot permissions
     CHANNEL_ID = "-1003194542999"  # TODO: Replace with the correct channel ID
